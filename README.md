@@ -1,4 +1,4 @@
-# Auditor
+# Auditor [![Build Status](https://www.travis-ci.org/lukaszbudnik/auditor.svg?branch=master)](https://www.travis-ci.org/lukaszbudnik/auditor)
 
 Auditor records audit entries in a blockchain backed by DynamoDB and CosmosDB.
 

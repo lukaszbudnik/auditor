@@ -7,8 +7,6 @@ else
   packages="$1"
 fi
 
-go clean -testcache
-
 go test -race -covermode=atomic -coverprofile=coverage.txt ./$packages
 if [[ $? -ne 0 ]]; then
   fail=1
