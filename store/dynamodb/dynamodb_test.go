@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/lukaszbudnik/auditor/hash"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -127,8 +127,8 @@ func TestDynamoDB(t *testing.T) {
 	// and nanoseconds are just fine...
 	time1 := time.Now().Truncate(time.Nanosecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Nanosecond)
-	store.Save(&hash.Block{Customer: "abc", Timestamp: time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
-	store.Save(&hash.Block{Customer: "abc", Timestamp: time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
 
 	audit, err := store.Read(1, nil)
 	assert.Nil(t, err)

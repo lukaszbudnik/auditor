@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"errors"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -8,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/lukaszbudnik/auditor/hash"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
@@ -16,7 +17,7 @@ type dynamoDB struct {
 	client *dynamodb.DynamoDB
 }
 
-func (d *dynamoDB) Save(block *hash.Block) error {
+func (d *dynamoDB) Save(block *model.Block) error {
 	av, err := dynamodbattribute.MarshalMap(block)
 	if err != nil {
 		return err
@@ -32,7 +33,7 @@ func (d *dynamoDB) Save(block *hash.Block) error {
 	return err
 }
 
-func (d *dynamoDB) Read(limit int64, lastBlock *hash.Block) ([]hash.Block, error) {
+func (d *dynamoDB) Read(limit int64, lastBlock *model.Block) ([]model.Block, error) {
 	queryInput := &dynamodb.QueryInput{
 		TableName:              aws.String("audit"),
 		Limit:                  aws.Int64(limit),
@@ -56,7 +57,7 @@ func (d *dynamoDB) Read(limit int64, lastBlock *hash.Block) ([]hash.Block, error
 		return nil, err
 	}
 
-	audit := []hash.Block{}
+	audit := []model.Block{}
 	err = dynamodbattribute.UnmarshalListOfMaps(output.Items, &audit)
 	return audit, err
 }
@@ -65,6 +66,10 @@ func (d *dynamoDB) Close() {
 	if d.client != nil {
 		d.client.Config.Credentials.Expire()
 	}
+}
+
+func New() (store.Store, error) {
+	return nil, errors.New("dynamodb.New() to be implemented")
 }
 
 func NewDynamoDB(creds *credentials.Credentials, endpoint string) (store.Store, error) {

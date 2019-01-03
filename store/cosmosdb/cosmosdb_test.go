@@ -8,35 +8,31 @@ import (
 
 	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
-	"github.com/lukaszbudnik/auditor/hash"
+	"github.com/joho/godotenv"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
+	if err := godotenv.Load("../../.env.test"); err != nil {
+		log.Fatalf("Could not read env variables: %v", err.Error())
+	}
 	if err := tearDown(); err != nil {
-		log.Printf("Error cleaning old records: %v", err.Error())
-		os.Exit(1)
+		log.Fatalf("Error cleaning old records: %v", err.Error())
 	}
 	os.Exit(m.Run())
 	tearDown()
 }
 
 func TestCosmosDB(t *testing.T) {
-	// Azure CosmosDB endpoint
-	// Addrs:    []string{fmt.Sprintf("%s.documents.azure.com:10255", database)},
-	username := ""
-	password := ""
-	addrs := []string{"127.0.0.1:27017"}
-	tlsEncryption := false
-
-	store, err := NewCosmosDB(username, password, addrs, tlsEncryption)
+	store, err := New()
 	assert.Nil(t, err)
 	defer store.Close()
 
 	time1 := time.Now().Truncate(time.Millisecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Millisecond)
-	store.Save(&hash.Block{Customer: "abc", Timestamp: time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
-	store.Save(&hash.Block{Customer: "abc", Timestamp: time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
 
 	audit, err := store.Read(1, nil)
 	assert.Nil(t, err)
