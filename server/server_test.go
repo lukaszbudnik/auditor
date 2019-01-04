@@ -56,7 +56,8 @@ func newMockStoreWithErrorAndAudit(threshold int, audit []model.Block) func() (s
 }
 
 func newJSONInput() *bytes.Buffer {
-	input := `{"Event": "new event"}`
+	time := time.Now().Format(time.RFC3339Nano)
+	input := fmt.Sprintf(`{"Event": "new event", "Timestamp": "%v"}`, time)
 	return bytes.NewBufferString(input)
 }
 
@@ -132,7 +133,7 @@ func TestAuditMethodNotAllowed(t *testing.T) {
 func TestAuditGet(t *testing.T) {
 	time, _ := time.Parse(time.RFC3339Nano, "2019-01-03T08:09:09.611985+01:00")
 	audit := []model.Block{}
-	audit = append(audit, model.Block{Customer: "a", Timestamp: time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
+	audit = append(audit, model.Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
 	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit), hash.Serialize)
 
 	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
@@ -180,7 +181,6 @@ func TestAuditPost(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"PreviousHash":""}`, strings.TrimSpace(w.Body.String()))
 }
 
 func TestAuditPostPreviousHash(t *testing.T) {
@@ -195,7 +195,7 @@ func TestAuditPostPreviousHash(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"PreviousHash":"1234567890abcdef"}`, strings.TrimSpace(w.Body.String()))
+	assert.Contains(t, strings.TrimSpace(w.Body.String()), `"PreviousHash":"1234567890abcdef"`)
 }
 
 func TestAuditPostRequestIOError(t *testing.T) {
@@ -210,7 +210,7 @@ func TestAuditPostRequestIOError(t *testing.T) {
 	assert.Equal(t, `{"ErrorMessage":"trouble maker"}`, strings.TrimSpace(w.Body.String()))
 }
 
-func TestAuditPostRequestError(t *testing.T) {
+func TestAuditPostJSONError(t *testing.T) {
 	json := `{"event"]`
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", bytes.NewBufferString(json))
 
@@ -221,6 +221,20 @@ func TestAuditPostRequestError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
 	assert.Equal(t, `{"ErrorMessage":"invalid character ']' after object key"}`, strings.TrimSpace(w.Body.String()))
+}
+
+func TestAuditPostValidationError(t *testing.T) {
+	// Timestamp is required
+	json := fmt.Sprintf(`{"Event": "new event"}`)
+	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", bytes.NewBufferString(json))
+
+	w := httptest.NewRecorder()
+	handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+	handler(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
+	assert.Equal(t, `{"ErrorMessage":"Timestamp: zero value"}`, strings.TrimSpace(w.Body.String()))
 }
 
 func TestAuditPostStoreError(t *testing.T) {

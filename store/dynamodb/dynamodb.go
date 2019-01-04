@@ -1,11 +1,12 @@
 package dynamodb
 
 import (
-	"errors"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -68,16 +69,31 @@ func (d *dynamoDB) Close() {
 	}
 }
 
+// New creates Store implementation for DynamoDB
 func New() (store.Store, error) {
-	return nil, errors.New("dynamodb.New() to be implemented")
+	client, err := newClient()
+	if err != nil {
+		return nil, err
+	}
+
+	dynamoDB := &dynamoDB{client: client}
+	return dynamoDB, nil
 }
 
-func NewDynamoDB(creds *credentials.Credentials, endpoint string) (store.Store, error) {
-	dynamoDBPersister := &dynamoDB{}
+func newClient() (*dynamodb.DynamoDB, error) {
+	endpoint := os.Getenv("AWS_DYNAMODB_ENDPOINT")
+	region := os.Getenv("AWS_REGION")
+
+	creds := credentials.NewChainCredentials(
+		[]credentials.Provider{
+			&credentials.EnvProvider{},
+			&credentials.SharedCredentialsProvider{},
+			&ec2rolecreds.EC2RoleProvider{},
+		})
 
 	sess, err := session.NewSession(&aws.Config{
 		Credentials: creds,
-		Region:      aws.String("us-west-2"),
+		Region:      aws.String(region),
 		Endpoint:    aws.String(endpoint)})
 
 	if err != nil {
@@ -86,7 +102,5 @@ func NewDynamoDB(creds *credentials.Credentials, endpoint string) (store.Store, 
 
 	client := dynamodb.New(sess)
 
-	dynamoDBPersister.client = client
-
-	return dynamoDBPersister, nil
+	return client, nil
 }

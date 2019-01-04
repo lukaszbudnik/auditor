@@ -1,7 +1,7 @@
 package dynamodb
 
 import (
-	"fmt"
+	"log"
 	"os"
 	"testing"
 	"time"
@@ -9,51 +9,42 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/joho/godotenv"
 	"github.com/lukaszbudnik/auditor/model"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMain(m *testing.M) {
+	if err := godotenv.Load("../../.env.test.dynamodb"); err != nil {
+		log.Fatalf("Could not read env variables: %v", err.Error())
+	}
+	if err := tearDown(); err != nil {
+		log.Fatalf("Could not delete old table: %v", err.Error())
+	}
+	if err := setup(); err != nil {
+		log.Fatalf("Could not create table: %v", err.Error())
+	}
+	result := m.Run()
 	tearDown()
-	setup()
-	os.Exit(m.Run())
-	tearDown()
+	os.Exit(result)
 }
 
 func newTestCreds() *credentials.Credentials {
 	creds := credentials.NewChainCredentials(
 		[]credentials.Provider{
-			&credentials.StaticProvider{Value: credentials.Value{
-				AccessKeyID:     "abc",
-				SecretAccessKey: "def",
-				SessionToken:    "xyz",
-			}},
 			&credentials.EnvProvider{},
+			&credentials.SharedCredentialsProvider{},
 			&ec2rolecreds.EC2RoleProvider{},
 		})
 	return creds
 }
 
-func setup() {
-
-	creds := newTestCreds()
-
-	sess, err := session.NewSession(&aws.Config{
-		Credentials: creds,
-		Region:      aws.String("us-west-2"),
-		Endpoint:    aws.String("http://localhost:8000")},
-	)
-
+func setup() error {
+	client, err := newClient()
 	if err != nil {
-		fmt.Println("Got error connecting:")
-		fmt.Println(err.Error())
-		os.Exit(1)
+		return err
 	}
-
-	// Create DynamoDB client
-	svc := dynamodb.New(sess)
 
 	createTableInput := &dynamodb.CreateTableInput{
 		AttributeDefinitions: []*dynamodb.AttributeDefinition{
@@ -83,43 +74,50 @@ func setup() {
 		TableName: aws.String("audit"),
 	}
 
-	_, err = svc.CreateTable(createTableInput)
-
+	_, err = client.CreateTable(createTableInput)
 	if err != nil {
-		fmt.Println("Got error calling CreateTable:")
-		fmt.Println(err.Error())
-		os.Exit(1)
+		log.Fatalf("Got error calling CreateTable: %v", err.Error())
 	}
 
+	return err
 }
 
-func tearDown() {
+func tearDown() error {
 
-	creds := newTestCreds()
-
-	sess, err := session.NewSession(&aws.Config{
-		Credentials: creds,
-		Region:      aws.String("us-west-2"),
-		Endpoint:    aws.String("http://localhost:8000")},
-	)
+	client, err := newClient()
 	if err != nil {
-		fmt.Println("Got error connecting:")
-		fmt.Println(err.Error())
-		os.Exit(1)
+		return err
 	}
 
-	// Create DynamoDB client
-	svc := dynamodb.New(sess)
+	listTableInput := &dynamodb.ListTablesInput{}
+	listTableOutput, err := client.ListTables(listTableInput)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for _, tableName := range listTableOutput.TableNames {
+		if *tableName == "audit" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil
+	}
 
 	deleteTableInput := &dynamodb.DeleteTableInput{
 		TableName: aws.String("audit"),
 	}
 
-	svc.DeleteTable(deleteTableInput)
+	_, err = client.DeleteTable(deleteTableInput)
+
+	return err
 }
 
 func TestDynamoDB(t *testing.T) {
-	store, err := NewDynamoDB(newTestCreds(), "http://localhost:8000")
+	store, err := New()
 	assert.Nil(t, err)
 	defer store.Close()
 
@@ -127,8 +125,8 @@ func TestDynamoDB(t *testing.T) {
 	// and nanoseconds are just fine...
 	time1 := time.Now().Truncate(time.Nanosecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Nanosecond)
-	store.Save(&model.Block{Customer: "abc", Timestamp: time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
-	store.Save(&model.Block{Customer: "abc", Timestamp: time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
 
 	audit, err := store.Read(1, nil)
 	assert.Nil(t, err)

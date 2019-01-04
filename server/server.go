@@ -16,6 +16,7 @@ import (
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/auditor/store/provider"
 	"github.com/lukaszbudnik/migrator/common"
+	"gopkg.in/validator.v2"
 )
 
 const (
@@ -44,7 +45,7 @@ func getLastBlock(r *http.Request) *model.Block {
 	if err != nil {
 		return nil
 	}
-	return &model.Block{Timestamp: time}
+	return &model.Block{Timestamp: &time}
 }
 
 func errorResponse(w http.ResponseWriter, errorStatus int, response interface{}) {
@@ -70,8 +71,11 @@ func jsonResponse(w http.ResponseWriter, response interface{}) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func okResponseWithMessage(w http.ResponseWriter, previousHash string) {
-	jsonResponse(w, struct{ PreviousHash string }{previousHash})
+func okResponseWithMessage(w http.ResponseWriter, hash, previousHash string) {
+	jsonResponse(w, struct {
+		Hash         string
+		PreviousHash string
+	}{hash, previousHash})
 }
 
 func tracing(next http.Handler) http.Handler {
@@ -145,8 +149,12 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 		errorResponseWithStatusAndErrorMessage(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// validate input - todo
-	log.Println(block)
+	err = validator.Validate(block)
+	if err != nil {
+		common.LogError(r.Context(), "Validation error: %v", err.Error())
+		errorResponseWithStatusAndErrorMessage(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	store, err := newStore()
 	if err != nil {
@@ -183,7 +191,7 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 		return
 	}
 
-	okResponseWithMessage(w, block.PreviousHash)
+	okResponseWithMessage(w, block.Hash, block.PreviousHash)
 }
 
 func registerHandlers() *http.ServeMux {
