@@ -48,7 +48,7 @@ func TestMongoDB(t *testing.T) {
 	assert.Nil(t, err)
 	// there are at minimum 5 indexes (there is a default _id_ index in addition to 4 defined in model.Block)
 	// when using CosmosDB there are additional indexes prefixed DocumentDBDefaultIndex thus using greater than
-	assert.True(t, len(indexes) > 5)
+	assert.True(t, len(indexes) >= 5)
 }
 
 func tearDown() error {
