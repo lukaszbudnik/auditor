@@ -42,6 +42,13 @@ func TestMongoDB(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, time1.UTC().String(), audit[0].Timestamp.UTC().String())
 
+	session, err := newSession()
+	assert.Nil(t, err)
+	indexes, err := session.DB("audit").C("audit").Indexes()
+	assert.Nil(t, err)
+	// there are at minimum 5 indexes (there is a default _id_ index in addition to 4 defined in model.Block)
+	// when using CosmosDB there are additional indexes prefixed DocumentDBDefaultIndex thus using greater than
+	assert.True(t, len(indexes) > 5)
 }
 
 func tearDown() error {

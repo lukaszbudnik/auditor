@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"github.com/lukaszbudnik/auditor/store"
 )
 
-// entry represents an audit entry in CosmosDB
+// entry represents an audit entry in MongoDB
 type entry struct {
 	ID bson.ObjectId `bson:"_id,omitempty"`
 	model.Block
@@ -26,6 +27,23 @@ type mongoDB struct {
 
 func (c *mongoDB) Save(block *model.Block) error {
 	collection := c.session.DB("audit").C("audit")
+
+	// add indexes
+	t := reflect.TypeOf(*block)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		name := field.Name
+		tag := field.Tag.Get("auditor")
+		if tag == "index" {
+			index := mgo.Index{
+				Key:        []string{name},
+				Background: true,
+			}
+			if err := collection.EnsureIndex(index); err != nil {
+				return err
+			}
+		}
+	}
 
 	// insert Document in collection
 	if err := collection.Insert(&entry{Block: *block}); err != nil {

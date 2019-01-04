@@ -8,11 +8,11 @@ import (
 
 // Block is a base struct which should be embedded by implementation-specific ones
 type Block struct {
-	Customer     string
-	Timestamp    *time.Time `validate:"nonzero"`
-	Category     string
-	Subcategory  string
-	Event        string `validate:"nonzero"`
+	Customer     string     `auditor:"index"`
+	Timestamp    *time.Time `validate:"nonzero" auditor:"index"`
+	Category     string     `auditor:"index"`
+	Subcategory  string     `auditor:"index"`
+	Event        string     `validate:"nonzero"`
 	Hash         string
 	PreviousHash string
 }
