@@ -2,6 +2,7 @@ package mongodb
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net"
 	"os"
 	"reflect"
@@ -11,30 +12,23 @@ import (
 
 	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
-
-// entry represents an audit entry in MongoDB
-type entry struct {
-	ID bson.ObjectId `bson:"_id,omitempty"`
-	model.Block
-}
 
 type mongoDB struct {
 	session *mgo.Session
 }
 
-func (c *mongoDB) Save(block *model.Block) error {
+func (c *mongoDB) Save(block interface{}) error {
 	collection := c.session.DB("audit").C("audit")
 
 	// add indexes
-	t := reflect.TypeOf(*block)
+	t := reflect.ValueOf(block).Elem().Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		name := field.Name
 		tag := field.Tag.Get("auditor")
-		if tag == "index" {
+		if strings.Contains(tag, "mongodb_index") {
 			index := mgo.Index{
 				Key:        []string{name},
 				Background: true,
@@ -46,34 +40,64 @@ func (c *mongoDB) Save(block *model.Block) error {
 	}
 
 	// insert Document in collection
-	if err := collection.Insert(&entry{Block: *block}); err != nil {
+	if err := collection.Insert(block); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c *mongoDB) Read(limit int64, lastBlock *model.Block) ([]model.Block, error) {
-	collection := c.session.DB("audit").C("audit")
+func (c *mongoDB) Read(result interface{}, limit int64, last interface{}) error {
+
+	resultv := reflect.ValueOf(result)
+	if resultv.Kind() != reflect.Ptr {
+		panic("result argument must be a pointer to slice of struct")
+	}
+	slicev := resultv.Elem()
+	if slicev.Kind() != reflect.Slice {
+		panic("result argument must be a pointer to slice of struct")
+	}
+	if slicev.Type().Elem().Kind() != reflect.Struct {
+		panic("result argument must be a pointer to slice of struct")
+	}
+
+	var timestampFieldName string
+	// dynamic here
+	for i := 0; i < slicev.Type().Elem().NumField(); i++ {
+		field := slicev.Type().Elem().Field(i)
+		tag := field.Tag.Get("auditor")
+		if strings.Contains(tag, "mongodb_range") && field.Type == reflect.TypeOf(&time.Time{}) {
+			timestampFieldName = field.Name
+		}
+	}
 
 	query := bson.M{}
-	if lastBlock != nil {
-		query = bson.M{"block.timestamp": bson.M{"$lt": lastBlock.Timestamp}}
+
+	if last != nil {
+		lastv := reflect.ValueOf(last)
+		if lastv.Kind() != reflect.Ptr {
+			panic("last argument must be a pointer to struct")
+		}
+		if lastv.Type().Elem().Kind() != reflect.Struct {
+			panic("last argument must be a pointer to struct")
+		}
+
+		if lastv.Type().Elem() != slicev.Type().Elem() {
+			panic("result and last arguments must be of the same type")
+		}
+
+		// dynamic here
+		field, _ := slicev.Type().Elem().FieldByName(timestampFieldName)
+		tag := field.Tag.Get("auditor")
+		if strings.Contains(tag, "mongodb_range") && field.Type == reflect.TypeOf(&time.Time{}) {
+			timestamp := lastv.Elem().FieldByName(timestampFieldName).Interface()
+			query = bson.M{strings.ToLower(timestampFieldName): bson.M{"$lt": timestamp}}
+		}
+
 	}
-	iter := collection.Find(query).Sort("-block.timestamp").Limit(int(limit)).Iter()
 
-	var audit []model.Block
-	var entry entry
-
-	for iter.Next(&entry) {
-		audit = append(audit, entry.Block)
-	}
-
-	if err := iter.Close(); err != nil {
-		return nil, err
-	}
-
-	return audit, nil
+	collection := c.session.DB("audit").C("audit")
+	return collection.Find(query).Sort(fmt.Sprintf("-%v", strings.ToLower(timestampFieldName))).Limit(int(limit)).All(result)
 }
 
 func (c *mongoDB) Close() {
@@ -89,8 +113,8 @@ func New() (store.Store, error) {
 		return nil, err
 	}
 
-	var mongoDBPersister store.Store = &mongoDB{session: session}
-	return mongoDBPersister, nil
+	var mongoDB store.Store = &mongoDB{session: session}
+	return mongoDB, nil
 }
 
 func newSession() (*mgo.Session, error) {

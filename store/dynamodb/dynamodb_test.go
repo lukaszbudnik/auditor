@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/joho/godotenv"
 	"github.com/lukaszbudnik/auditor/model"
@@ -30,15 +28,15 @@ func TestMain(m *testing.M) {
 	os.Exit(result)
 }
 
-func newTestCreds() *credentials.Credentials {
-	creds := credentials.NewChainCredentials(
-		[]credentials.Provider{
-			&credentials.EnvProvider{},
-			&credentials.SharedCredentialsProvider{},
-			&ec2rolecreds.EC2RoleProvider{},
-		})
-	return creds
-}
+// func newTestCreds() *credentials.Credentials {
+// 	creds := credentials.NewChainCredentials(
+// 		[]credentials.Provider{
+// 			&credentials.EnvProvider{},
+// 			&credentials.SharedCredentialsProvider{},
+// 			&ec2rolecreds.EC2RoleProvider{},
+// 		})
+// 	return creds
+// }
 
 func setup() error {
 	client, err := newClient()
@@ -128,12 +126,21 @@ func TestDynamoDB(t *testing.T) {
 	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
 	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
 
-	audit, err := store.Read(1, nil)
+	last := model.Block{Customer: "abc"}
+	page1 := []model.Block{}
+	err = store.Read(&page1, 1, &last)
 	assert.Nil(t, err)
-	assert.Equal(t, time2.UTC().String(), audit[0].Timestamp.UTC().String())
+	assert.Equal(t, time2.UTC().String(), page1[0].Timestamp.UTC().String())
 
-	audit, err = store.Read(1, &audit[0])
+	page2 := []model.Block{}
+	err = store.Read(&page2, 1, &page1[0])
 	assert.Nil(t, err)
-	assert.Equal(t, time1.UTC().String(), audit[0].Timestamp.UTC().String())
+	assert.Equal(t, time1.UTC().String(), page2[0].Timestamp.UTC().String())
 
+	all := []model.Block{}
+	store.Read(&all, 2, &last)
+	assert.Nil(t, err)
+	assert.Equal(t, len(all), len(page1)+len(page2))
+	assert.Subset(t, all, page1)
+	assert.Subset(t, all, page2)
 }

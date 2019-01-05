@@ -8,10 +8,10 @@ import (
 
 // Block is a base struct which should be embedded by implementation-specific ones
 type Block struct {
-	Customer     string     `auditor:"index"`
-	Timestamp    *time.Time `validate:"nonzero" auditor:"index"`
-	Category     string     `auditor:"index"`
-	Subcategory  string     `auditor:"index"`
+	Customer     string     `auditor:"dynamodb_hash,mongodb_index"`
+	Timestamp    *time.Time `auditor:"dynamodb_range,mongodb_range,mongodb_index" validate:"nonzero" `
+	Category     string     `auditor:"mongodb_index"`
+	Subcategory  string     `auditor:"mongodb_index"`
 	Event        string     `validate:"nonzero"`
 	Hash         string
 	PreviousHash string

@@ -125,13 +125,14 @@ func auditGetHandler(w http.ResponseWriter, r *http.Request, newStore func() (st
 	limit := getLimit(r)
 	lastBlock := getLastBlock(r)
 
-	audits, err := store.Read(limit, lastBlock)
+	audit := []model.Block{}
+	err = store.Read(&audit, limit, &lastBlock)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
 		return
 	}
 
-	jsonResponse(w, audits)
+	jsonResponse(w, audit)
 }
 
 func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (store.Store, error), serialize func(object interface{}) ([]byte, error)) {
@@ -167,7 +168,8 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 	lock.Lock()
 	defer lock.Unlock()
 
-	audit, err := store.Read(1, nil)
+	audit := []model.Block{}
+	err = store.Read(&audit, 1, nil)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
 		return

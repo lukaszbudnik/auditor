@@ -1,7 +1,10 @@
 package dynamodb
 
 import (
+	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -10,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
@@ -18,7 +20,7 @@ type dynamoDB struct {
 	client *dynamodb.DynamoDB
 }
 
-func (d *dynamoDB) Save(block *model.Block) error {
+func (d *dynamoDB) Save(block interface{}) error {
 	av, err := dynamodbattribute.MarshalMap(block)
 	if err != nil {
 		return err
@@ -34,33 +36,80 @@ func (d *dynamoDB) Save(block *model.Block) error {
 	return err
 }
 
-func (d *dynamoDB) Read(limit int64, lastBlock *model.Block) ([]model.Block, error) {
-	queryInput := &dynamodb.QueryInput{
-		TableName:              aws.String("audit"),
-		Limit:                  aws.Int64(limit),
-		ScanIndexForward:       aws.Bool(false),
-		KeyConditionExpression: aws.String("Customer = :customer"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{":customer": {
-			S: aws.String("abc"),
-		}},
+func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error {
+
+	resultv := reflect.ValueOf(result)
+	if resultv.Kind() != reflect.Ptr {
+		panic("result argument must be a pointer to slice of struct")
+	}
+	slicev := resultv.Elem()
+	if slicev.Kind() != reflect.Slice {
+		panic("result argument must be a pointer to slice of struct")
+	}
+	if slicev.Type().Elem().Kind() != reflect.Struct {
+		panic("result argument must be a pointer to slice of struct")
 	}
 
-	if lastBlock != nil {
-		queryInput.ExclusiveStartKey = map[string]*dynamodb.AttributeValue{"Customer": {
-			S: aws.String(lastBlock.Customer),
-		}, "Timestamp": {
-			S: aws.String(lastBlock.Timestamp.Format(time.RFC3339Nano)),
-		}}
+	lastv := reflect.ValueOf(last)
+	if lastv.Kind() != reflect.Ptr {
+		panic("last argument must be a pointer to struct")
+	}
+	if lastv.Type().Elem().Kind() != reflect.Struct {
+		panic("last argument must be a pointer to struct")
+	}
+
+	if lastv.Type().Elem() != slicev.Type().Elem() {
+		panic("result and last arguments must be of the same type")
+	}
+
+	queryInput := &dynamodb.QueryInput{
+		TableName:        aws.String("audit"),
+		Limit:            aws.Int64(limit),
+		ScanIndexForward: aws.Bool(false),
+	}
+
+	var exclusiveStartKey map[string]*dynamodb.AttributeValue
+	for i := 0; i < lastv.Elem().NumField(); i++ {
+		field := slicev.Type().Elem().Field(i)
+		tag := field.Tag.Get("auditor")
+		if strings.Contains(tag, "dynamodb_range") && field.Type == reflect.TypeOf(&time.Time{}) && !lastv.Elem().Field(i).IsNil() {
+			in := []reflect.Value{reflect.ValueOf(time.RFC3339Nano)}
+			timestamp := lastv.Elem().Field(i).MethodByName("Format").Call(in)[0]
+			exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
+			exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
+				S: aws.String(fmt.Sprintf("%v", timestamp)),
+			}
+		}
+	}
+
+	for i := 0; i < lastv.Elem().NumField(); i++ {
+		field := slicev.Type().Elem().Field(i)
+		tag := field.Tag.Get("auditor")
+		if strings.Contains(tag, "dynamodb_hash") {
+			value := lastv.Elem().Field(i).Interface()
+			queryInput.SetKeyConditionExpression(fmt.Sprintf("%v = :hash", field.Name))
+			queryInput.SetExpressionAttributeValues(map[string]*dynamodb.AttributeValue{":hash": {
+				S: aws.String(fmt.Sprintf("%v", value)),
+			}})
+			if exclusiveStartKey != nil {
+				exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
+					S: aws.String(fmt.Sprintf("%v", value)),
+				}
+			}
+			break
+		}
+	}
+
+	if exclusiveStartKey != nil {
+		queryInput.SetExclusiveStartKey(exclusiveStartKey)
 	}
 
 	output, err := d.client.Query(queryInput)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	audit := []model.Block{}
-	err = dynamodbattribute.UnmarshalListOfMaps(output.Items, &audit)
-	return audit, err
+	return dynamodbattribute.UnmarshalListOfMaps(output.Items, &result)
 }
 
 func (d *dynamoDB) Close() {

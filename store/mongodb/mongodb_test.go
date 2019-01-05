@@ -31,16 +31,25 @@ func TestMongoDB(t *testing.T) {
 
 	time1 := time.Now().Truncate(time.Millisecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Millisecond)
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated", Hash: "abc"})
+	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated", Hash: "def"})
 
-	audit, err := store.Read(1, nil)
+	page1 := []model.Block{}
+	err = store.Read(&page1, 1, nil)
 	assert.Nil(t, err)
-	assert.Equal(t, time2.UTC().String(), audit[0].Timestamp.UTC().String())
+	assert.Equal(t, time2.UTC().String(), page1[0].Timestamp.UTC().String())
 
-	audit, err = store.Read(1, &audit[0])
+	page2 := []model.Block{}
+	err = store.Read(&page2, 1, &page1[0])
 	assert.Nil(t, err)
-	assert.Equal(t, time1.UTC().String(), audit[0].Timestamp.UTC().String())
+	assert.Equal(t, time1.UTC().String(), page2[0].Timestamp.UTC().String())
+
+	all := []model.Block{}
+	err = store.Read(&all, 2, nil)
+	assert.Nil(t, err)
+	assert.Equal(t, len(all), len(page1)+len(page2))
+	assert.Subset(t, all, page1)
+	assert.Subset(t, all, page2)
 
 	session, err := newSession()
 	assert.Nil(t, err)
@@ -61,9 +70,9 @@ func tearDown() error {
 
 	iter := collection.Find(nil).Iter()
 
-	var entry entry
+	var entry model.Block
 	for iter.Next(&entry) {
-		deleteQuery := bson.M{"_id": entry.ID}
+		deleteQuery := bson.M{"hash": entry.Hash}
 		err = collection.Remove(deleteQuery)
 		if err != nil {
 			return err
