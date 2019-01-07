@@ -8,9 +8,16 @@ import (
 
 	"github.com/globalsign/mgo/bson"
 	"github.com/joho/godotenv"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/stretchr/testify/assert"
 )
+
+type testBlock struct {
+	Category     string     `auditor:"mongodb_index"`
+	Timestamp    *time.Time `auditor:"range,mongodb_index"`
+	Event        string
+	Hash         string `auditor:"hash"`
+	PreviousHash string `auditor:"previoushash"`
+}
 
 func TestMain(m *testing.M) {
 	if err := godotenv.Load("../../.env.test.mongodb"); err != nil {
@@ -31,20 +38,22 @@ func TestMongoDB(t *testing.T) {
 
 	time1 := time.Now().Truncate(time.Millisecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Millisecond)
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated", Hash: "abc"})
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated", Hash: "def"})
+	store.Save(&testBlock{Timestamp: &time1, Category: "restapi", Event: "first record updated"})
+	store.Save(&testBlock{Timestamp: &time2, Category: "restapi", Event: "second record updated"})
 
-	page1 := []model.Block{}
+	page1 := []testBlock{}
 	err = store.Read(&page1, 1, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, time2.UTC().String(), page1[0].Timestamp.UTC().String())
+	assert.Equal(t, "second record updated", page1[0].Event)
 
-	page2 := []model.Block{}
+	page2 := []testBlock{}
 	err = store.Read(&page2, 1, &page1[0])
 	assert.Nil(t, err)
 	assert.Equal(t, time1.UTC().String(), page2[0].Timestamp.UTC().String())
+	assert.Equal(t, "first record updated", page2[0].Event)
 
-	all := []model.Block{}
+	all := []testBlock{}
 	err = store.Read(&all, 2, nil)
 	assert.Nil(t, err)
 	assert.Equal(t, len(all), len(page1)+len(page2))
@@ -55,9 +64,9 @@ func TestMongoDB(t *testing.T) {
 	assert.Nil(t, err)
 	indexes, err := session.DB("audit").C("audit").Indexes()
 	assert.Nil(t, err)
-	// there are at minimum 5 indexes (there is a default _id_ index in addition to 4 defined in model.Block)
-	// when using CosmosDB there are additional indexes prefixed DocumentDBDefaultIndex thus using greater than
-	assert.True(t, len(indexes) >= 5)
+	// there are at minimum 3 indexes (there is a default _id_ index in addition to 2 defined in testBlock)
+	// when using CosmosDB there are additional indexes prefixed DocumentDBDefaultIndex thus using greater than assertion
+	assert.True(t, len(indexes) >= 3)
 }
 
 func tearDown() error {
@@ -70,7 +79,7 @@ func tearDown() error {
 
 	iter := collection.Find(nil).Iter()
 
-	var entry model.Block
+	var entry testBlock
 	for iter.Next(&entry) {
 		deleteQuery := bson.M{"hash": entry.Hash}
 		err = collection.Remove(deleteQuery)

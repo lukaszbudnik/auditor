@@ -8,36 +8,49 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
 type mongoDB struct {
 	session *mgo.Session
+	lock    *sync.Mutex
 }
 
-func (c *mongoDB) Save(block interface{}) error {
-	collection := c.session.DB("audit").C("audit")
+func (m *mongoDB) Save(block interface{}) error {
+	collection := m.session.DB("audit").C("audit")
 
-	// add indexes
-	t := reflect.ValueOf(block).Elem().Type()
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
+	indexFields := model.GetFieldsTaggedWith(block, "mongodb_index")
+	for _, field := range indexFields {
 		name := field.Name
-		tag := field.Tag.Get("auditor")
-		if strings.Contains(tag, "mongodb_index") {
-			index := mgo.Index{
-				Key:        []string{name},
-				Background: true,
-			}
-			if err := collection.EnsureIndex(index); err != nil {
-				return err
-			}
+		index := mgo.Index{
+			Key:        []string{name},
+			Background: true,
+		}
+		if err := collection.EnsureIndex(index); err != nil {
+			return err
 		}
 	}
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	// get type
+	t := reflect.ValueOf(block).Elem().Type()
+	// create *[]type
+	ts := reflect.SliceOf(t)
+	ptr := reflect.New(ts)
+	ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
+
+	m.Read(ptr.Interface(), 1, nil)
+	if ptr.Elem().Len() > 0 {
+		model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+	}
+	model.ComputeAndSetHash(block)
 
 	// insert Document in collection
 	if err := collection.Insert(block); err != nil {
@@ -47,7 +60,7 @@ func (c *mongoDB) Save(block interface{}) error {
 	return nil
 }
 
-func (c *mongoDB) Read(result interface{}, limit int64, last interface{}) error {
+func (m *mongoDB) Read(result interface{}, limit int64, last interface{}) error {
 
 	resultv := reflect.ValueOf(result)
 	if resultv.Kind() != reflect.Ptr {
@@ -61,17 +74,10 @@ func (c *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 		panic("result argument must be a pointer to slice of struct")
 	}
 
-	var timestampFieldName string
-	// dynamic here
-	for i := 0; i < slicev.Type().Elem().NumField(); i++ {
-		field := slicev.Type().Elem().Field(i)
-		tag := field.Tag.Get("auditor")
-		if strings.Contains(tag, "mongodb_range") && field.Type == reflect.TypeOf(&time.Time{}) {
-			timestampFieldName = field.Name
-		}
-	}
-
 	query := bson.M{}
+
+	rangeFields := model.GetTypeFieldsTaggedWith(slicev.Type().Elem(), "range")
+	rangeField := rangeFields[0]
 
 	if last != nil {
 		lastv := reflect.ValueOf(last)
@@ -87,22 +93,17 @@ func (c *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 		}
 
 		// dynamic here
-		field, _ := slicev.Type().Elem().FieldByName(timestampFieldName)
-		tag := field.Tag.Get("auditor")
-		if strings.Contains(tag, "mongodb_range") && field.Type == reflect.TypeOf(&time.Time{}) {
-			timestamp := lastv.Elem().FieldByName(timestampFieldName).Interface()
-			query = bson.M{strings.ToLower(timestampFieldName): bson.M{"$lt": timestamp}}
-		}
-
+		timestamp := lastv.Elem().FieldByName(rangeField.Name).Interface()
+		query = bson.M{strings.ToLower(rangeField.Name): bson.M{"$lt": timestamp}}
 	}
 
-	collection := c.session.DB("audit").C("audit")
-	return collection.Find(query).Sort(fmt.Sprintf("-%v", strings.ToLower(timestampFieldName))).Limit(int(limit)).All(result)
+	collection := m.session.DB("audit").C("audit")
+	return collection.Find(query).Sort(fmt.Sprintf("-%v", strings.ToLower(rangeField.Name))).Limit(int(limit)).All(result)
 }
 
-func (c *mongoDB) Close() {
-	if c.session != nil {
-		c.session.Close()
+func (m *mongoDB) Close() {
+	if m.session != nil {
+		m.session.Close()
 	}
 }
 
@@ -113,7 +114,7 @@ func New() (store.Store, error) {
 		return nil, err
 	}
 
-	var mongoDB store.Store = &mongoDB{session: session}
+	var mongoDB store.Store = &mongoDB{session: session, lock: &sync.Mutex{}}
 	return mongoDB, nil
 }
 

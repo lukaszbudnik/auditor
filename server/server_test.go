@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/lukaszbudnik/auditor/hash"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/migrator/common"
 	"github.com/stretchr/testify/assert"
@@ -41,15 +40,15 @@ func newMockStore() (store.Store, error) {
 	return newMockStoreWithError(-1)()
 }
 
-func newMockStoreWithAudit(audit []model.Block) func() (store.Store, error) {
+func newMockStoreWithAudit(audit []Block) func() (store.Store, error) {
 	return newMockStoreWithErrorAndAudit(-1, audit)
 }
 
 func newMockStoreWithError(threshold int) func() (store.Store, error) {
-	return newMockStoreWithErrorAndAudit(threshold, []model.Block{})
+	return newMockStoreWithErrorAndAudit(threshold, []Block{})
 }
 
-func newMockStoreWithErrorAndAudit(threshold int, audit []model.Block) func() (store.Store, error) {
+func newMockStoreWithErrorAndAudit(threshold int, audit []Block) func() (store.Store, error) {
 	return func() (store.Store, error) {
 		return &mockStore{errorThreshold: threshold, counter: 1, audit: audit}, nil
 	}
@@ -82,7 +81,7 @@ func TestGetLimitError(t *testing.T) {
 }
 
 func TestGetLastBlock(t *testing.T) {
-	request, err := newTestRequest(http.MethodGet, "http://example.com/?timestamp=2019-01-01T12:39:01.999999999%2B01:00", nil)
+	request, err := newTestRequest(http.MethodGet, "http://example.com/?range=2019-01-01T12:39:01.999999999%2B01:00", nil)
 	assert.Nil(t, err)
 
 	lastBlock := getLastBlock(request)
@@ -132,8 +131,8 @@ func TestAuditMethodNotAllowed(t *testing.T) {
 
 func TestAuditGet(t *testing.T) {
 	time, _ := time.Parse(time.RFC3339Nano, "2019-01-03T08:09:09.611985+01:00")
-	audit := []model.Block{}
-	audit = append(audit, model.Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
+	audit := []Block{}
+	audit = append(audit, Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
 	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit), hash.Serialize)
 
 	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
@@ -184,8 +183,8 @@ func TestAuditPost(t *testing.T) {
 }
 
 func TestAuditPostPreviousHash(t *testing.T) {
-	audit := []model.Block{}
-	audit = append(audit, model.Block{Hash: "1234567890abcdef"})
+	audit := []Block{}
+	audit = append(audit, Block{Hash: "1234567890abcdef"})
 	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit), hash.Serialize)
 
 	json := newJSONInput()
@@ -265,30 +264,15 @@ func TestAuditPostStoreReadError(t *testing.T) {
 	assert.Equal(t, `{"ErrorMessage":"Error 1"}`, strings.TrimSpace(w.Body.String()))
 }
 
-func TestAuditPostStoreSerializeError(t *testing.T) {
-	json := newJSONInput()
-	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
-
-	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStore, func(object interface{}) ([]byte, error) {
-		return nil, errors.New("trouble maker")
-	})
-	handler(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"ErrorMessage":"trouble maker"}`, strings.TrimSpace(w.Body.String()))
-}
-
 func TestAuditPostStoreSaveError(t *testing.T) {
 	json := newJSONInput()
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStoreWithError(2), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithError(1), hash.Serialize)
 	handler(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"ErrorMessage":"Error 2"}`, strings.TrimSpace(w.Body.String()))
+	assert.Equal(t, `{"ErrorMessage":"Error 1"}`, strings.TrimSpace(w.Body.String()))
 }

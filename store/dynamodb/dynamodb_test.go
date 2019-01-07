@@ -9,9 +9,18 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/joho/godotenv"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/stretchr/testify/assert"
 )
+
+type testBlock struct {
+	Customer     string     `auditor:"dynamodb_hash"`
+	Timestamp    *time.Time `auditor:"range"`
+	Category     string
+	Subcategory  string
+	Event        string
+	Hash         string `auditor:"hash"`
+	PreviousHash string `auditor:"previoushash"`
+}
 
 func TestMain(m *testing.M) {
 	if err := godotenv.Load("../../.env.test.dynamodb"); err != nil {
@@ -27,16 +36,6 @@ func TestMain(m *testing.M) {
 	tearDown()
 	os.Exit(result)
 }
-
-// func newTestCreds() *credentials.Credentials {
-// 	creds := credentials.NewChainCredentials(
-// 		[]credentials.Provider{
-// 			&credentials.EnvProvider{},
-// 			&credentials.SharedCredentialsProvider{},
-// 			&ec2rolecreds.EC2RoleProvider{},
-// 		})
-// 	return creds
-// }
 
 func setup() error {
 	client, err := newClient()
@@ -123,21 +122,21 @@ func TestDynamoDB(t *testing.T) {
 	// and nanoseconds are just fine...
 	time1 := time.Now().Truncate(time.Nanosecond)
 	time2 := time1.Add(1 * time.Second).Truncate(time.Nanosecond)
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
-	store.Save(&model.Block{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
+	store.Save(&testBlock{Customer: "abc", Timestamp: &time1, Category: "restapi", Subcategory: "db", Event: "record updated"})
+	store.Save(&testBlock{Customer: "abc", Timestamp: &time2, Category: "restapi", Subcategory: "cache", Event: "record updated"})
 
-	last := model.Block{Customer: "abc"}
-	page1 := []model.Block{}
+	last := testBlock{Customer: "abc"}
+	page1 := []testBlock{}
 	err = store.Read(&page1, 1, &last)
 	assert.Nil(t, err)
 	assert.Equal(t, time2.UTC().String(), page1[0].Timestamp.UTC().String())
 
-	page2 := []model.Block{}
+	page2 := []testBlock{}
 	err = store.Read(&page2, 1, &page1[0])
 	assert.Nil(t, err)
 	assert.Equal(t, time1.UTC().String(), page2[0].Timestamp.UTC().String())
 
-	all := []model.Block{}
+	all := []testBlock{}
 	store.Read(&all, 2, &last)
 	assert.Nil(t, err)
 	assert.Equal(t, len(all), len(page1)+len(page2))

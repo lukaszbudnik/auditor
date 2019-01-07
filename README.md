@@ -1,8 +1,53 @@
 # Auditor [![Build Status](https://www.travis-ci.org/lukaszbudnik/auditor.svg?branch=master)](https://www.travis-ci.org/lukaszbudnik/auditor)
 
-Auditor records audit entries in a blockchain backed by DynamoDB and CosmosDB (using MongoDB API).
+Auditor records audit entries in a blockchain backed by AWS DynamoDB and Azure CosmosDB (MongoDB API).
 
 This is a work in progress.
+
+# Blockchain
+
+Auditor uses simple blockchain implementation on top of AWS DynamoDB and Azure CosmosDB (MongoDB API). The `store.Store` looks like this:
+
+```
+type Store interface {
+	Save(block interface{}) error
+	Read(result interface{}, limit int64, last interface{}) error
+	Close()
+}
+```
+
+The interface is generic and operates on well known `interface{}` constructs.
+
+## MongoDB
+
+For MongoDB a simple block struct could look like this:
+
+```
+type Block struct {
+	Timestamp    *time.Time `auditor:"mongodb_range,mongodb_index" validate:"nonzero"`
+	Category     string     `auditor:"mongodb_index"`
+	Event        string     `validate:"nonzero"`
+	Hash         string     `auditor:"hash"`
+	PreviousHash string     `auditor:"previoushash"`
+}
+```
+
+Such struct has:
+
+* [required] string field tagged with `auditor:"hash"` - used for storing block hash
+* [required] string field tagged with `auditor:"previoushash"` - used for storing previous block hash
+* [required] time field tagged with `auditor:"mongodb_range"` - used for viewing/paging blocks
+* [optional] any field can have `mongodb_index` added to auditor tag for example `auditor:"mongodb_range,mongodb_index"` - used for ensuring collection indexes
+* [optional] if you want to have access to native `_id` column add field: `` ID bson.ObjectId bson:"_id,omitempty"` ``
+
+MongoDB implementation works like this:
+
+* `Save(block interface{})` - accepts a pointer to struct and saves it in MongoDB, before saving computes hash and sets previous hash values, also ensures that all relevant indexes are created
+* `Read(result interface{}, limit int64, last interface{})` - reads blocks from MongoDB and copies them to `result` which is a pointer to slice of structs, `limit` specifies how many records to read, `last` is an optional argument, when not nil must be a pointer to struct of the same type as `result`, `last` is used for paging, the field tagged with `auditor: "mongodb_range"` is used in MongoDB's query `{field: {$lt: value} }`, results are sorted by the field tagged with `auditor: "mongodb_range"` in descending order `{$sort: {field: -1}}`
+
+For usage see test: `store/mongodb/mongodb_test.go`.
+
+## DynamoDB
 
 # REST API
 

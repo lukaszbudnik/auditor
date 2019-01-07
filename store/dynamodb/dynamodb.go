@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -13,11 +14,13 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
 type dynamoDB struct {
 	client *dynamodb.DynamoDB
+	lock   *sync.Mutex
 }
 
 func (d *dynamoDB) Save(block interface{}) error {
@@ -25,6 +28,29 @@ func (d *dynamoDB) Save(block interface{}) error {
 	if err != nil {
 		return err
 	}
+
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// get type
+	t := reflect.ValueOf(block).Elem().Type()
+	// create *[]type
+	ts := reflect.SliceOf(t)
+	ptr := reflect.New(ts)
+	ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
+
+	// for dynamodb last block must not be empty
+	// and most field with have dynamodb_hash tag populated
+	// below we are copying it from the block
+	lastv := reflect.New(t)
+	fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_hash")
+	value := model.GetFieldValue(block, fields[0])
+	model.SetField(lastv.Interface(), fields[0], value)
+
+	d.Read(ptr.Interface(), 1, lastv.Interface())
+	if ptr.Elem().Len() > 0 {
+		model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+	}
+	model.ComputeAndSetHash(block)
 
 	putInput := &dynamodb.PutItemInput{
 		Item:      av,
@@ -38,6 +64,10 @@ func (d *dynamoDB) Save(block interface{}) error {
 
 func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error {
 
+	if last == nil {
+		panic("last argument must not be nil as it is used for DynamoDB hash key")
+	}
+
 	resultv := reflect.ValueOf(result)
 	if resultv.Kind() != reflect.Ptr {
 		panic("result argument must be a pointer to slice of struct")
@@ -48,6 +78,14 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 	}
 	if slicev.Type().Elem().Kind() != reflect.Struct {
 		panic("result argument must be a pointer to slice of struct")
+	}
+
+	var exclusiveStartKey map[string]*dynamodb.AttributeValue
+
+	queryInput := &dynamodb.QueryInput{
+		TableName:        aws.String("audit"),
+		Limit:            aws.Int64(limit),
+		ScanIndexForward: aws.Bool(false),
 	}
 
 	lastv := reflect.ValueOf(last)
@@ -62,26 +100,38 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 		panic("result and last arguments must be of the same type")
 	}
 
-	queryInput := &dynamodb.QueryInput{
-		TableName:        aws.String("audit"),
-		Limit:            aws.Int64(limit),
-		ScanIndexForward: aws.Bool(false),
-	}
+	// todo make dynamic!
+	// fields := model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "range")
+	// log.Println(fields)
+	// for i := 0; i < lastv.Elem().NumField(); i++ {
+	// 	field := slicev.Type().Elem().Field(i)
+	// 	tag := field.Tag.Get("auditor")
+	// 	if strings.Contains(tag, "range") && field.Type == reflect.TypeOf(&time.Time{}) && !lastv.Elem().Field(i).IsNil() {
+	// 		in := []reflect.Value{reflect.ValueOf(time.RFC3339Nano)}
+	// 		timestamp := lastv.Elem().Field(i).MethodByName("Format").Call(in)[0]
+	// 		exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
+	// 		exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
+	// 			S: aws.String(fmt.Sprintf("%v", timestamp)),
+	// 		}
+	// 	}
+	// }
 
-	var exclusiveStartKey map[string]*dynamodb.AttributeValue
-	for i := 0; i < lastv.Elem().NumField(); i++ {
-		field := slicev.Type().Elem().Field(i)
-		tag := field.Tag.Get("auditor")
-		if strings.Contains(tag, "dynamodb_range") && field.Type == reflect.TypeOf(&time.Time{}) && !lastv.Elem().Field(i).IsNil() {
-			in := []reflect.Value{reflect.ValueOf(time.RFC3339Nano)}
-			timestamp := lastv.Elem().Field(i).MethodByName("Format").Call(in)[0]
-			exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
-			exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
-				S: aws.String(fmt.Sprintf("%v", timestamp)),
-			}
+	fields := model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "range")
+	// log.Println(fields)
+
+	field := fields[0]
+	fieldi := model.GetFieldValue(last, field)
+	fieldv := reflect.ValueOf(fieldi)
+	if field.Type == reflect.TypeOf(&time.Time{}) && !fieldv.IsNil() {
+		in := []reflect.Value{reflect.ValueOf(time.RFC3339Nano)}
+		timestamp := fieldv.MethodByName("Format").Call(in)[0]
+		exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
+		exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
+			S: aws.String(fmt.Sprintf("%v", timestamp)),
 		}
 	}
 
+	//
 	for i := 0; i < lastv.Elem().NumField(); i++ {
 		field := slicev.Type().Elem().Field(i)
 		tag := field.Tag.Get("auditor")
@@ -125,7 +175,7 @@ func New() (store.Store, error) {
 		return nil, err
 	}
 
-	dynamoDB := &dynamoDB{client: client}
+	dynamoDB := &dynamoDB{client: client, lock: &sync.Mutex{}}
 	return dynamoDB, nil
 }
 

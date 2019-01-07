@@ -8,27 +8,30 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/lukaszbudnik/auditor/hash"
-	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/auditor/store/provider"
 	"github.com/lukaszbudnik/migrator/common"
 	"gopkg.in/validator.v2"
 )
 
+// Block is a base struct which should be embedded by implementation-specific ones
+type Block struct {
+	Customer     string     `auditor:"dynamodb_hash,mongodb_index"`
+	Timestamp    *time.Time `auditor:"range,mongodb_index" validate:"nonzero"`
+	Category     string     `auditor:"mongodb_index"`
+	Subcategory  string     `auditor:"mongodb_index"`
+	Event        string     `validate:"nonzero"`
+	Hash         string     `auditor:"hash"`
+	PreviousHash string     `auditor:"previoushash"`
+}
+
 const (
 	defaultPort     string = "8080"
 	requestIDHeader string = "X-Request-Id"
 )
-
-var lock = &sync.Mutex{}
-
-func newStore() (store.Store, error) {
-	return provider.NewStore()
-}
 
 func getLimit(r *http.Request) int64 {
 	s := r.URL.Query().Get("limit")
@@ -39,13 +42,15 @@ func getLimit(r *http.Request) int64 {
 	return limit
 }
 
-func getLastBlock(r *http.Request) *model.Block {
-	s := r.URL.Query().Get("timestamp")
-	time, err := time.Parse(time.RFC3339Nano, s)
+func getLastBlock(r *http.Request) *Block {
+	// todo dynamic!
+	t := r.URL.Query().Get("range")
+	time, err := time.Parse(time.RFC3339Nano, t)
 	if err != nil {
 		return nil
 	}
-	return &model.Block{Timestamp: &time}
+	h := r.URL.Query().Get("dynamodb_hash")
+	return &Block{Timestamp: &time, Hash: h}
 }
 
 func errorResponse(w http.ResponseWriter, errorStatus int, response interface{}) {
@@ -125,7 +130,7 @@ func auditGetHandler(w http.ResponseWriter, r *http.Request, newStore func() (st
 	limit := getLimit(r)
 	lastBlock := getLastBlock(r)
 
-	audit := []model.Block{}
+	audit := []Block{}
 	err = store.Read(&audit, limit, &lastBlock)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
@@ -143,7 +148,7 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 		return
 	}
 
-	block := &model.Block{}
+	block := &Block{}
 	err = json.Unmarshal(body, block)
 	if err != nil {
 		common.LogError(r.Context(), "Bad request: %v", err.Error())
@@ -165,28 +170,6 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 	}
 	defer store.Close()
 
-	lock.Lock()
-	defer lock.Unlock()
-
-	audit := []model.Block{}
-	err = store.Read(&audit, 1, nil)
-	if err != nil {
-		errorInternalServerErrorResponse(w, err)
-		return
-	}
-
-	if len(audit) == 1 {
-		previousBlock := &audit[0]
-		block.PreviousHash = previousBlock.Hash
-	}
-
-	hash, err := hash.ComputeHashWithSerialize(block, serialize)
-	if err != nil {
-		errorInternalServerErrorResponse(w, err)
-		return
-	}
-	block.Hash = hash
-
 	err = store.Save(block)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
@@ -199,7 +182,7 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 func registerHandlers() *http.ServeMux {
 	router := http.NewServeMux()
 	router.Handle("/", http.NotFoundHandler())
-	router.Handle("/audit", makeHandler(auditHandler, newStore, hash.Serialize))
+	router.Handle("/audit", makeHandler(auditHandler, provider.NewStore, hash.Serialize))
 	return router
 }
 
