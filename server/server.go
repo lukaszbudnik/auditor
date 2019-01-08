@@ -10,9 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/lukaszbudnik/auditor/hash"
 	"github.com/lukaszbudnik/auditor/store"
-	"github.com/lukaszbudnik/auditor/store/provider"
 	"github.com/lukaszbudnik/migrator/common"
 	"gopkg.in/validator.v2"
 )
@@ -98,13 +96,13 @@ func tracing(next http.Handler) http.Handler {
 	})
 }
 
-func makeHandler(handler func(http.ResponseWriter, *http.Request, func() (store.Store, error), func(object interface{}) ([]byte, error)), newStore func() (store.Store, error), serialize func(object interface{}) ([]byte, error)) http.HandlerFunc {
+func makeHandler(handler func(http.ResponseWriter, *http.Request, store.Store), store store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handler(w, r, newStore, serialize)
+		handler(w, r, store)
 	}
 }
 
-func auditHandler(w http.ResponseWriter, r *http.Request, newStore func() (store.Store, error), serialize func(object interface{}) ([]byte, error)) {
+func auditHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		common.LogError(r.Context(), "Wrong method: %v", r.Method)
 		errorDefaultResponse(w, http.StatusMethodNotAllowed)
@@ -112,26 +110,19 @@ func auditHandler(w http.ResponseWriter, r *http.Request, newStore func() (store
 	}
 	common.LogInfo(r.Context(), "Start")
 	if r.Method == http.MethodGet {
-		auditGetHandler(w, r, newStore)
+		auditGetHandler(w, r, store)
 	}
 	if r.Method == http.MethodPost {
-		auditPostHandler(w, r, newStore, serialize)
+		auditPostHandler(w, r, store)
 	}
 }
 
-func auditGetHandler(w http.ResponseWriter, r *http.Request, newStore func() (store.Store, error)) {
-	store, err := newStore()
-	if err != nil {
-		common.LogError(r.Context(), "Internal server error - could not connect to backend store: %v", err.Error())
-		errorInternalServerErrorResponse(w, err)
-		return
-	}
-	defer store.Close()
+func auditGetHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 	limit := getLimit(r)
 	lastBlock := getLastBlock(r)
 
 	audit := []Block{}
-	err = store.Read(&audit, limit, &lastBlock)
+	err := store.Read(&audit, limit, &lastBlock)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
 		return
@@ -140,7 +131,7 @@ func auditGetHandler(w http.ResponseWriter, r *http.Request, newStore func() (st
 	jsonResponse(w, audit)
 }
 
-func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (store.Store, error), serialize func(object interface{}) ([]byte, error)) {
+func auditPostHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		common.LogError(r.Context(), "Error reading request: %v", err.Error())
@@ -162,14 +153,6 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 		return
 	}
 
-	store, err := newStore()
-	if err != nil {
-		common.LogError(r.Context(), "Internal server error - could not connect to backend store: %v", err.Error())
-		errorInternalServerErrorResponse(w, err)
-		return
-	}
-	defer store.Close()
-
 	err = store.Save(block)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
@@ -179,18 +162,18 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, newStore func() (s
 	okResponseWithMessage(w, block.Hash, block.PreviousHash)
 }
 
-func registerHandlers() *http.ServeMux {
+func registerHandlers(store store.Store) *http.ServeMux {
 	router := http.NewServeMux()
 	router.Handle("/", http.NotFoundHandler())
-	router.Handle("/audit", makeHandler(auditHandler, provider.NewStore, hash.Serialize))
+	router.Handle("/audit", makeHandler(auditHandler, store))
 	return router
 }
 
 // Start starts simple Auditor API
-func Start() (*http.Server, error) {
+func Start(store store.Store) (*http.Server, error) {
 	log.Printf("INFO auditor starting on port %s", defaultPort)
 
-	router := registerHandlers()
+	router := registerHandlers(store)
 
 	server := &http.Server{
 		Addr:    ":" + defaultPort,

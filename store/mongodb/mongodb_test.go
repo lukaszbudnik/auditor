@@ -13,7 +13,7 @@ import (
 
 type testBlock struct {
 	Category     string     `auditor:"mongodb_index"`
-	Timestamp    *time.Time `auditor:"range,mongodb_index"`
+	Timestamp    *time.Time `auditor:"sort,mongodb_index"`
 	Event        string
 	Hash         string `auditor:"hash"`
 	PreviousHash string `auditor:"previoushash"`

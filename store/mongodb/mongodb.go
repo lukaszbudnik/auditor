@@ -76,8 +76,8 @@ func (m *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 
 	query := bson.M{}
 
-	rangeFields := model.GetTypeFieldsTaggedWith(slicev.Type().Elem(), "range")
-	rangeField := rangeFields[0]
+	sortFields := model.GetTypeFieldsTaggedWith(slicev.Type().Elem(), "sort")
+	sortField := sortFields[0]
 
 	if last != nil {
 		lastv := reflect.ValueOf(last)
@@ -93,12 +93,12 @@ func (m *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 		}
 
 		// dynamic here
-		timestamp := lastv.Elem().FieldByName(rangeField.Name).Interface()
-		query = bson.M{strings.ToLower(rangeField.Name): bson.M{"$lt": timestamp}}
+		timestamp := lastv.Elem().FieldByName(sortField.Name).Interface()
+		query = bson.M{strings.ToLower(sortField.Name): bson.M{"$lt": timestamp}}
 	}
 
 	collection := m.session.DB("audit").C("audit")
-	return collection.Find(query).Sort(fmt.Sprintf("-%v", strings.ToLower(rangeField.Name))).Limit(int(limit)).All(result)
+	return collection.Find(query).Sort(fmt.Sprintf("-%v", strings.ToLower(sortField.Name))).Limit(int(limit)).All(result)
 }
 
 func (m *mongoDB) Close() {

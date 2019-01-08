@@ -6,7 +6,7 @@ This is a work in progress.
 
 # Blockchain
 
-Auditor uses simple blockchain implementation on top of AWS DynamoDB and Azure CosmosDB (MongoDB API). The `store.Store` looks like this:
+Auditor uses simple blockchain implementation on top of AWS DynamoDB and Azure CosmosDB (MongoDB API). The `store.Store` interface looks like this:
 
 ```
 type Store interface {
@@ -24,7 +24,7 @@ For MongoDB a simple block struct could look like this:
 
 ```
 type Block struct {
-	Timestamp    *time.Time `auditor:"mongodb_range,mongodb_index" validate:"nonzero"`
+	Timestamp    *time.Time `auditor:"sort,mongodb_index" validate:"nonzero"`
 	Category     string     `auditor:"mongodb_index"`
 	Event        string     `validate:"nonzero"`
 	Hash         string     `auditor:"hash"`
@@ -36,18 +36,45 @@ Such struct has:
 
 * [required] string field tagged with `auditor:"hash"` - used for storing block hash
 * [required] string field tagged with `auditor:"previoushash"` - used for storing previous block hash
-* [required] time field tagged with `auditor:"mongodb_range"` - used for viewing/paging blocks
-* [optional] any field can have `mongodb_index` added to auditor tag for example `auditor:"mongodb_range,mongodb_index"` - used for ensuring collection indexes
+* [required] time field tagged with `auditor:"sort"` - used for viewing/paging blocks
+* [optional] any field can have `mongodb_index` added to auditor tag for example `auditor:"sort,mongodb_index"` - used for ensuring collection indexes
 * [optional] if you want to have access to native `_id` column add field: `` ID bson.ObjectId bson:"_id,omitempty"` ``
 
 MongoDB implementation works like this:
 
 * `Save(block interface{})` - accepts a pointer to struct and saves it in MongoDB, before saving computes hash and sets previous hash values, also ensures that all relevant indexes are created
-* `Read(result interface{}, limit int64, last interface{})` - reads blocks from MongoDB and copies them to `result` which is a pointer to slice of structs, `limit` specifies how many records to read, `last` is an optional argument, when not nil must be a pointer to struct of the same type as `result`, `last` is used for paging, the field tagged with `auditor: "mongodb_range"` is used in MongoDB's query `{field: {$lt: value} }`, results are sorted by the field tagged with `auditor: "mongodb_range"` in descending order `{$sort: {field: -1}}`
+* `Read(result interface{}, limit int64, last interface{})` - reads blocks from MongoDB and copies them to `result` which is a pointer to a slice of structs, `limit` specifies how many records to read, `last` is an optional argument, must be a pointer to a struct of the same type as `result`, `last` is used for paging, the field tagged with `auditor: "sort"` is used in MongoDB's less than query: `{field: {$lt: value} }`, results are sorted by the same field in descending order `{$sort: {field: -1}}`
 
 For usage see test: `store/mongodb/mongodb_test.go`.
 
 ## DynamoDB
+
+For DynamoDB a simple block struct could look like this:
+
+```
+type Block struct {
+	Customer     string     `auditor:"dynamodb_partition"`
+	Timestamp    *time.Time `auditor:"sort" validate:"nonzero"`
+	Category     string
+	Event        string     `validate:"nonzero"`
+	Hash         string     `auditor:"hash"`
+	PreviousHash string     `auditor:"previoushash"`
+}
+```
+
+Such struct has:
+
+* [required] string field tagged with `auditor:"hash"` - used for storing block hash
+* [required] string field tagged with `auditor:"previoushash"` - used for storing previous block hash
+* [required] string field tagged with `auditor:"dynamodb_partition"` - used as partition key of DynamoDB primary key, used for viewing/paging blocks
+* [required] time field tagged with `auditor:"sort"` - used as a sort key of DynamoDB primary key, used for viewing/paging blocks
+
+DynamoDB implementation works like this:
+
+* `Save(block interface{})` - accepts a pointer to struct and saves it in DynamoDB, before saving computes hash and sets previous hash values
+* `Read(result interface{}, limit int64, last interface{})` - reads blocks from DynamoDB and copies them to `result` which is a pointer to a slice of structs, `limit` specifies how many records to read, `last` in DynamoDB implementation is a required argument, must be a pointer to a struct of the same type as `result`, values from `last` fields tagged with `auditor: "dynamodb_partition"` and `auditor: "sort"` are used in DynamoDB query's _KeyConditionExpression_ and _ExclusiveStartKey_ parameters, results are sorted in descending order by setting _ScanIndexForward_ parameter to false
+
+For usage see test: `store/dynamodb/dynamodb_test.go`.
 
 # REST API
 

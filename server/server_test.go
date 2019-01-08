@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lukaszbudnik/auditor/hash"
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/migrator/common"
 	"github.com/stretchr/testify/assert"
@@ -36,21 +35,21 @@ func newTestRequest(method, url string, body io.Reader) (*http.Request, error) {
 	return req.WithContext(ctx), err
 }
 
-func newMockStore() (store.Store, error) {
+func newMockStore() store.Store {
 	return newMockStoreWithError(-1)()
 }
 
-func newMockStoreWithAudit(audit []Block) func() (store.Store, error) {
+func newMockStoreWithAudit(audit []Block) func() store.Store {
 	return newMockStoreWithErrorAndAudit(-1, audit)
 }
 
-func newMockStoreWithError(threshold int) func() (store.Store, error) {
+func newMockStoreWithError(threshold int) func() store.Store {
 	return newMockStoreWithErrorAndAudit(threshold, []Block{})
 }
 
-func newMockStoreWithErrorAndAudit(threshold int, audit []Block) func() (store.Store, error) {
-	return func() (store.Store, error) {
-		return &mockStore{errorThreshold: threshold, counter: 1, audit: audit}, nil
+func newMockStoreWithErrorAndAudit(threshold int, audit []Block) func() store.Store {
+	return func() store.Store {
+		return &mockStore{errorThreshold: threshold, counter: 1, audit: audit}
 	}
 }
 
@@ -100,7 +99,8 @@ func TestGetLastBlockError(t *testing.T) {
 }
 
 func TestRegisterHandlers(t *testing.T) {
-	router := registerHandlers()
+	mockStore := newMockStore()
+	router := registerHandlers(mockStore)
 	assert.NotNil(t, router)
 }
 
@@ -121,7 +121,7 @@ func TestAuditMethodNotAllowed(t *testing.T) {
 		req, _ := newTestRequest(httpMethod, "http://example.com/audit", nil)
 
 		w := httptest.NewRecorder()
-		handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+		handler := makeHandler(auditHandler, newMockStore())
 		handler(w, req)
 
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
@@ -133,7 +133,7 @@ func TestAuditGet(t *testing.T) {
 	time, _ := time.Parse(time.RFC3339Nano, "2019-01-03T08:09:09.611985+01:00")
 	audit := []Block{}
 	audit = append(audit, Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
-	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit)())
 
 	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
 	w := httptest.NewRecorder()
@@ -144,22 +144,8 @@ func TestAuditGet(t *testing.T) {
 	assert.Equal(t, `[{"Customer":"a","Timestamp":"2019-01-03T08:09:09.611985+01:00","Category":"cat","Subcategory":"subcat","Event":"some event","Hash":"1234567890abcdef","PreviousHash":"0987654321xyzghj"}]`, strings.TrimSpace(w.Body.String()))
 }
 
-func TestAuditGetStoreError(t *testing.T) {
-	handler := makeHandler(auditHandler, func() (store.Store, error) {
-		return nil, errors.New("trouble maker")
-	}, hash.Serialize)
-
-	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
-	w := httptest.NewRecorder()
-	handler(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"ErrorMessage":"trouble maker"}`, strings.TrimSpace(w.Body.String()))
-}
-
 func TestAuditGetReadError(t *testing.T) {
-	handler := makeHandler(auditHandler, newMockStoreWithError(1), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithError(1)())
 
 	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
 	w := httptest.NewRecorder()
@@ -175,7 +161,7 @@ func TestAuditPost(t *testing.T) {
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStore())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -185,7 +171,7 @@ func TestAuditPost(t *testing.T) {
 func TestAuditPostPreviousHash(t *testing.T) {
 	audit := []Block{}
 	audit = append(audit, Block{Hash: "1234567890abcdef"})
-	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit)())
 
 	json := newJSONInput()
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
@@ -201,7 +187,7 @@ func TestAuditPostRequestIOError(t *testing.T) {
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", errReader(0))
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStore())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -214,7 +200,7 @@ func TestAuditPostJSONError(t *testing.T) {
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", bytes.NewBufferString(json))
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStore())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -228,7 +214,7 @@ func TestAuditPostValidationError(t *testing.T) {
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", bytes.NewBufferString(json))
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStore, hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStore())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -236,27 +222,12 @@ func TestAuditPostValidationError(t *testing.T) {
 	assert.Equal(t, `{"ErrorMessage":"Timestamp: zero value"}`, strings.TrimSpace(w.Body.String()))
 }
 
-func TestAuditPostStoreError(t *testing.T) {
-	json := newJSONInput()
-	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
-
-	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, func() (store.Store, error) {
-		return nil, errors.New("trouble maker")
-	}, hash.Serialize)
-	handler(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Equal(t, "application/json", w.HeaderMap["Content-Type"][0])
-	assert.Equal(t, `{"ErrorMessage":"trouble maker"}`, strings.TrimSpace(w.Body.String()))
-}
-
 func TestAuditPostStoreReadError(t *testing.T) {
 	json := newJSONInput()
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStoreWithError(1), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithError(1)())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
@@ -269,7 +240,7 @@ func TestAuditPostStoreSaveError(t *testing.T) {
 	req, _ := newTestRequest(http.MethodPost, "http://example.com/audit", json)
 
 	w := httptest.NewRecorder()
-	handler := makeHandler(auditHandler, newMockStoreWithError(1), hash.Serialize)
+	handler := makeHandler(auditHandler, newMockStoreWithError(1)())
 	handler(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -42,7 +41,7 @@ func (d *dynamoDB) Save(block interface{}) error {
 	// and most field with have dynamodb_hash tag populated
 	// below we are copying it from the block
 	lastv := reflect.New(t)
-	fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_hash")
+	fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_partition")
 	value := model.GetFieldValue(block, fields[0])
 	model.SetField(lastv.Interface(), fields[0], value)
 
@@ -100,24 +99,7 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 		panic("result and last arguments must be of the same type")
 	}
 
-	// todo make dynamic!
-	// fields := model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "range")
-	// log.Println(fields)
-	// for i := 0; i < lastv.Elem().NumField(); i++ {
-	// 	field := slicev.Type().Elem().Field(i)
-	// 	tag := field.Tag.Get("auditor")
-	// 	if strings.Contains(tag, "range") && field.Type == reflect.TypeOf(&time.Time{}) && !lastv.Elem().Field(i).IsNil() {
-	// 		in := []reflect.Value{reflect.ValueOf(time.RFC3339Nano)}
-	// 		timestamp := lastv.Elem().Field(i).MethodByName("Format").Call(in)[0]
-	// 		exclusiveStartKey = make(map[string]*dynamodb.AttributeValue)
-	// 		exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
-	// 			S: aws.String(fmt.Sprintf("%v", timestamp)),
-	// 		}
-	// 	}
-	// }
-
-	fields := model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "range")
-	// log.Println(fields)
+	fields := model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "sort")
 
 	field := fields[0]
 	fieldi := model.GetFieldValue(last, field)
@@ -131,22 +113,18 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 		}
 	}
 
-	//
-	for i := 0; i < lastv.Elem().NumField(); i++ {
-		field := slicev.Type().Elem().Field(i)
-		tag := field.Tag.Get("auditor")
-		if strings.Contains(tag, "dynamodb_hash") {
-			value := lastv.Elem().Field(i).Interface()
-			queryInput.SetKeyConditionExpression(fmt.Sprintf("%v = :hash", field.Name))
-			queryInput.SetExpressionAttributeValues(map[string]*dynamodb.AttributeValue{":hash": {
-				S: aws.String(fmt.Sprintf("%v", value)),
-			}})
-			if exclusiveStartKey != nil {
-				exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
-					S: aws.String(fmt.Sprintf("%v", value)),
-				}
-			}
-			break
+	// todo: make dynamic!
+	fields = model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "dynamodb_partition")
+	field = fields[0]
+	value := model.GetFieldValue(last, field)
+
+	queryInput.SetKeyConditionExpression(fmt.Sprintf("%v = :partition", field.Name))
+	queryInput.SetExpressionAttributeValues(map[string]*dynamodb.AttributeValue{":partition": {
+		S: aws.String(fmt.Sprintf("%v", value)),
+	}})
+	if exclusiveStartKey != nil {
+		exclusiveStartKey[field.Name] = &dynamodb.AttributeValue{
+			S: aws.String(fmt.Sprintf("%v", value)),
 		}
 	}
 

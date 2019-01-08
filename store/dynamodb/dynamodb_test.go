@@ -13,8 +13,8 @@ import (
 )
 
 type testBlock struct {
-	Customer     string     `auditor:"dynamodb_hash"`
-	Timestamp    *time.Time `auditor:"range"`
+	Customer     string     `auditor:"dynamodb_partition"`
+	Timestamp    *time.Time `auditor:"sort"`
 	Category     string
 	Subcategory  string
 	Event        string
