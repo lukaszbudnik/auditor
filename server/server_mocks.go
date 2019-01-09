@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 
 	"github.com/lukaszbudnik/auditor/model"
@@ -37,7 +36,6 @@ func (ms *mockStore) Read(result interface{}, limit int64, last interface{}) err
 	slicev = slicev.Slice(0, slicev.Cap())
 
 	for _, b := range ms.audit {
-		log.Println(b)
 		slicev = reflect.Append(slicev, reflect.ValueOf(b))
 	}
 	resultv.Elem().Set(slicev.Slice(0, len(ms.audit)))

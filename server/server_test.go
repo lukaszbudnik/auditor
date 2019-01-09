@@ -80,21 +80,31 @@ func TestGetLimitError(t *testing.T) {
 }
 
 func TestGetLastBlock(t *testing.T) {
-	request, err := newTestRequest(http.MethodGet, "http://example.com/?range=2019-01-01T12:39:01.999999999%2B01:00", nil)
+	request, err := newTestRequest(http.MethodGet, "http://example.com/?sort=2019-01-01T12:39:01.999999999%2B01:00", nil)
 	assert.Nil(t, err)
-
-	lastBlock := getLastBlock(request)
+	lastBlock := &Block{}
+	getLastBlock(request, lastBlock)
 	assert.Equal(t, "2019-01-01 11:39:01 +0000 UTC", lastBlock.Timestamp.UTC().Truncate(time.Second).String())
+}
+
+func TestGetLastBlockWithDynamodbPartition(t *testing.T) {
+	request, err := newTestRequest(http.MethodGet, "http://example.com/?sort=2019-01-01T12:39:01.999999999%2B01:00&Customer=abc", nil)
+	assert.Nil(t, err)
+	lastBlock := &Block{}
+	getLastBlock(request, lastBlock)
+	assert.Equal(t, "2019-01-01 11:39:01 +0000 UTC", lastBlock.Timestamp.UTC().Truncate(time.Second).String())
+	assert.Equal(t, "abc", lastBlock.Customer)
 }
 
 func TestGetLastBlockError(t *testing.T) {
 	invalid := []string{"asdad", ""}
 	for _, i := range invalid {
-		request, err := newTestRequest(http.MethodGet, fmt.Sprintf("http://example.com/?timestamp=%v", i), nil)
+		request, err := newTestRequest(http.MethodGet, fmt.Sprintf("http://example.com/?sort=%v", i), nil)
 		assert.Nil(t, err)
 
-		lastBlock := getLastBlock(request)
-		assert.Nil(t, lastBlock)
+		lastBlock := &Block{}
+		getLastBlock(request, lastBlock)
+		assert.Nil(t, lastBlock.Timestamp)
 	}
 }
 

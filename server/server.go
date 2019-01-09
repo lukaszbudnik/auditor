@@ -10,15 +10,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/migrator/common"
 	"gopkg.in/validator.v2"
 )
 
-// Block is a base struct which should be embedded by implementation-specific ones
+// Block is a sample struct
 type Block struct {
-	Customer     string     `auditor:"dynamodb_hash,mongodb_index"`
-	Timestamp    *time.Time `auditor:"range,mongodb_index" validate:"nonzero"`
+	Customer     string     `auditor:"dynamodb_partition,mongodb_index"`
+	Timestamp    *time.Time `auditor:"sort,mongodb_index" validate:"nonzero"`
 	Category     string     `auditor:"mongodb_index"`
 	Subcategory  string     `auditor:"mongodb_index"`
 	Event        string     `validate:"nonzero"`
@@ -40,15 +41,18 @@ func getLimit(r *http.Request) int64 {
 	return limit
 }
 
-func getLastBlock(r *http.Request) *Block {
-	// todo dynamic!
-	t := r.URL.Query().Get("range")
+func getLastBlock(r *http.Request, result interface{}) {
+	t := r.URL.Query().Get("sort")
 	time, err := time.Parse(time.RFC3339Nano, t)
-	if err != nil {
-		return nil
+	if err == nil {
+		fields := model.GetFieldsTaggedWith(result, "sort")
+		model.SetField(result, fields[0], &time)
 	}
-	h := r.URL.Query().Get("dynamodb_hash")
-	return &Block{Timestamp: &time, Hash: h}
+	fields := model.GetFieldsTaggedWith(result, "dynamodb_partition")
+	if len(fields) > 0 {
+		partition := r.URL.Query().Get(fields[0].Name)
+		model.SetField(result, fields[0], partition)
+	}
 }
 
 func errorResponse(w http.ResponseWriter, errorStatus int, response interface{}) {
@@ -119,10 +123,12 @@ func auditHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 
 func auditGetHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 	limit := getLimit(r)
-	lastBlock := getLastBlock(r)
+
+	lastBlock := &Block{}
+	getLastBlock(r, lastBlock)
 
 	audit := []Block{}
-	err := store.Read(&audit, limit, &lastBlock)
+	err := store.Read(&audit, limit, lastBlock)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
 		return

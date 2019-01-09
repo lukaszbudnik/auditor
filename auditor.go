@@ -14,7 +14,7 @@ func main() {
 	}
 	store, err := provider.NewStore()
 	if err != nil {
-		log.Fatalf("Could not connect to backedn store: %v", err.Error())
+		log.Fatalf("Could not connect to backend store: %v", err.Error())
 	}
 	_, err = server.Start(store)
 	if err != nil {

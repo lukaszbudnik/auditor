@@ -23,11 +23,6 @@ type dynamoDB struct {
 }
 
 func (d *dynamoDB) Save(block interface{}) error {
-	av, err := dynamodbattribute.MarshalMap(block)
-	if err != nil {
-		return err
-	}
-
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	// get type
@@ -50,6 +45,11 @@ func (d *dynamoDB) Save(block interface{}) error {
 		model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
 	}
 	model.ComputeAndSetHash(block)
+
+	av, err := dynamodbattribute.MarshalMap(block)
+	if err != nil {
+		return err
+	}
 
 	putInput := &dynamodb.PutItemInput{
 		Item:      av,
@@ -113,7 +113,6 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 		}
 	}
 
-	// todo: make dynamic!
 	fields = model.GetTypeFieldsTaggedWith(lastv.Type().Elem(), "dynamodb_partition")
 	field = fields[0]
 	value := model.GetFieldValue(last, field)

@@ -79,8 +79,8 @@ func (m *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 	sortFields := model.GetTypeFieldsTaggedWith(slicev.Type().Elem(), "sort")
 	sortField := sortFields[0]
 
-	if last != nil {
-		lastv := reflect.ValueOf(last)
+	lastv := reflect.ValueOf(last)
+	if last != nil && !lastv.IsNil() {
 		if lastv.Kind() != reflect.Ptr {
 			panic("last argument must be a pointer to struct")
 		}
@@ -92,9 +92,11 @@ func (m *mongoDB) Read(result interface{}, limit int64, last interface{}) error 
 			panic("result and last arguments must be of the same type")
 		}
 
-		// dynamic here
 		timestamp := lastv.Elem().FieldByName(sortField.Name).Interface()
-		query = bson.M{strings.ToLower(sortField.Name): bson.M{"$lt": timestamp}}
+		timestampv := reflect.ValueOf(timestamp)
+		if !timestampv.IsNil() {
+			query = bson.M{strings.ToLower(sortField.Name): bson.M{"$lt": timestamp}}
+		}
 	}
 
 	collection := m.session.DB("audit").C("audit")

@@ -33,6 +33,7 @@ func TestMain(m *testing.M) {
 		log.Fatalf("Could not create table: %v", err.Error())
 	}
 	result := m.Run()
+
 	tearDown()
 	os.Exit(result)
 }
