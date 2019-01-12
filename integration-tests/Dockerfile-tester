@@ -1,0 +1,9 @@
+FROM alpine:3.8
+
+MAINTAINER Łukasz Budnik lukasz.budnik@gmail.com
+
+RUN apk add coreutils curl
+
+COPY integration-tests/entrypoint-tester.sh /
+
+ENTRYPOINT ["/entrypoint-tester.sh"]

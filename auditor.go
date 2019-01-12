@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"github.com/joho/godotenv"
@@ -8,16 +9,28 @@ import (
 	"github.com/lukaszbudnik/auditor/store/provider"
 )
 
+const (
+	// DefaultConfigFile defines default file name of migrator configuration file
+	DefaultConfigFile = ".env"
+)
+
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Fatalf("Could not load .env file")
+	var configFile string
+	flag.StringVar(&configFile, "configFile", "", "optional argument with a name of configuration file to use")
+	flag.Parse()
+	if len(configFile) == 0 {
+		configFile = DefaultConfigFile
 	}
+	if err := godotenv.Load(configFile); err != nil {
+		log.Fatalf("FATAL Could not load configuration file: %v", err.Error())
+	}
+	log.Printf("INFO auditor read configuration from file: %v", configFile)
 	store, err := provider.NewStore()
 	if err != nil {
-		log.Fatalf("Could not connect to backend store: %v", err.Error())
+		log.Fatalf("FATAL Could not connect to backend store: %v", err.Error())
 	}
 	_, err = server.Start(store)
 	if err != nil {
-		log.Fatalf("Could not start server: %v", err.Error())
+		log.Fatalf("FATAL Could not start server: %v", err.Error())
 	}
 }

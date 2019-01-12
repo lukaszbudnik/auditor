@@ -1,0 +1,43 @@
+version: '3'
+services:
+  coordinator:
+    build:
+      context: '..'
+      dockerfile: 'integration-tests/Dockerfile-coordinator'
+    image: 'auditor-coordinator:latest'
+    stdin_open: true
+    tty: true
+  dynamodb:
+    image: 'amazon/dynamodb-local'
+    ports:
+      - '8000'
+    depends_on:
+      - 'coordinator'
+  mongodb:
+    image: 'mongo'
+    ports:
+      - '27017'
+    depends_on:
+      - 'coordinator'
+  auditor:
+    build:
+      context: '..'
+      dockerfile: 'integration-tests/Dockerfile-auditor'
+    environment:
+      AUDITOR_STORE: 'dynamodb'
+      AUDITOR_CONFIG_FILE: '/.env.test.integration'
+    image: 'auditor:latest'
+    ports:
+      - '8080'
+    depends_on:
+      - 'dynamodb'
+      - 'mongodb'
+  tester:
+    build:
+      context: '..'
+      dockerfile: 'integration-tests/Dockerfile-tester'
+    environment:
+      NO_OF_TESTS: '100'
+    image: 'auditor-tester:latest'
+    depends_on:
+      - 'auditor'

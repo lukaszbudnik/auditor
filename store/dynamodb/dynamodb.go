@@ -33,7 +33,7 @@ func (d *dynamoDB) Save(block interface{}) error {
 	ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
 
 	// for dynamodb last block must not be empty
-	// and most field with have dynamodb_hash tag populated
+	// and most field tagged with dynamodb_partiion populated
 	// below we are copying it from the block
 	lastv := reflect.New(t)
 	fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_partition")
@@ -85,6 +85,7 @@ func (d *dynamoDB) Read(result interface{}, limit int64, last interface{}) error
 		TableName:        aws.String("audit"),
 		Limit:            aws.Int64(limit),
 		ScanIndexForward: aws.Bool(false),
+		ConsistentRead:   aws.Bool(true),
 	}
 
 	lastv := reflect.ValueOf(last)

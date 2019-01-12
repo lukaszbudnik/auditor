@@ -1,0 +1,11 @@
+FROM alpine:3.8
+
+MAINTAINER Łukasz Budnik lukasz.budnik@gmail.com
+
+RUN apk add nodejs npm
+RUN npm install aws-sdk
+
+COPY integration-tests/dynamodb-verify-integrity.js /
+COPY integration-tests/dynamodb-setup.js /
+
+CMD node dynamodb-setup.js && sh

@@ -1,0 +1,18 @@
+FROM golang:1.11.2-alpine3.8
+
+MAINTAINER Łukasz Budnik lukasz.budnik@gmail.com
+
+# build auditor
+RUN apk add git
+RUN mkdir -p /go/src/github.com/lukaszbudnik/auditor
+COPY . /go/src/github.com/lukaszbudnik/auditor
+RUN cd /go/src/github.com/lukaszbudnik/auditor && ./setup.sh
+RUN cd /go/src/github.com/lukaszbudnik/auditor && go install
+
+# copy config file
+COPY integration-tests/.env.test.integration /
+
+COPY integration-tests/entrypoint-auditor.sh /
+ENTRYPOINT ["/entrypoint-auditor.sh"]
+
+EXPOSE 8080

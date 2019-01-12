@@ -144,17 +144,13 @@ func newSession() (*mgo.Session, error) {
 		}
 	}
 
-	// Create a session which maintains a pool of socket connections
 	session, err := mgo.DialWithInfo(dialInfo)
 	if err != nil {
 		return nil, err
 	}
 
-	// SetSafe changes the session safety mode.
-	// If the safe parameter is nil, the session is put in unsafe mode, and writes become fire-and-forget,
-	// without error checking. The unsafe mode is faster since operations won't hold on waiting for a confirmation.
-	// http://godoc.org/labix.org/v2/mgo#Session.SetMode.
-	session.SetSafe(&mgo.Safe{})
+	session.SetSafe(&mgo.Safe{J: true})
+	session.SetMode(mgo.Primary, true)
 
 	return session, nil
 }
