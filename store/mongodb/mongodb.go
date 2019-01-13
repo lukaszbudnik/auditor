@@ -39,6 +39,7 @@ func (m *mongoDB) Save(block interface{}) error {
 
 	m.lock.Lock()
 	defer m.lock.Unlock()
+	time.Sleep(50 * time.Millisecond)
 	// get type
 	t := reflect.ValueOf(block).Elem().Type()
 	// create *[]type

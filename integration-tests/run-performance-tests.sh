@@ -3,7 +3,7 @@
 # I use relative paths so make sure we are inside tests dir
 cd $(dirname "$0")
 
-docker-compose -f docker-compose-distributed-performance-tests.yml up --detach --scale auditor=1 --scale tester=1
+docker-compose -f docker-compose-distributed-performance-tests.yml up --detach --scale auditor=1 --scale tester=3
 
 testers=$(docker-compose -f docker-compose-distributed-performance-tests.yml ps -q tester)
 

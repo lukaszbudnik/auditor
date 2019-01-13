@@ -206,7 +206,9 @@ $ docker-compose down
 
 # Known issues
 
-Currently (and as per created issues) auditor is using local locks which in distributed environment do not guarantee any integrity at all. Further, it even turned out that under a high load blockchain integrity is not guaranteed when running on a single auditor instance. This can be due to consistency limitations of backend DBs, using local containers for tests rather than fine-tuned production-grade servers (local DynamoDB has a limit of 5 for both read and write capacities - which is a very low value), or... a bogus implementation of auditor (but I will get to the bottom of it!).
+Currently (and as per created issues) auditor is using local locks which in distributed environment do not guarantee any integrity at all.
+
+Further, while running integration tests it turned out that under a high load blockchain integrity was not guaranteed even when running on a single auditor instance. In order to allow both DynamoDB and MongoDB to propagate changes I had to do explicit `time.Sleep(50 * time.Millisecond)` just after acquiring local lock. This slows down auditor itself, but thanks to this trick chainblock is consistent. Notice: This can be due to 1) consistency limitations of backend DBs (I ran some integration tests using AWS and Azure - will re-run more once I rewrite local locks to distributed locks) and 2) in case of local containers, the fact that local containers don't provide same performance as fine-tuned production-grade servers (for example local DynamoDB has a limit of 5 read and write capacity units).
 
 For running distributed simulations/performance tests there is an integration test suite in `integration-tests` directory. It comprises of the following 4 key files:
 
@@ -215,7 +217,7 @@ For running distributed simulations/performance tests there is an integration te
 * `dynamodb-verify-integrity.sh` - verifies if blockchain is correct in DynamoDB
 * `mongodb-verify-integrity.sh` - verifies if blockchain is correct in MongoDB
 
-By default `run-performance-tests.sh` launches 1 auditor and 1 tester container. When launched, tester container starts making HTTP requests.
+By default `run-performance-tests.sh` launches 1 auditor and 3 tester container. When launched, tester container starts making HTTP requests.
 
 MongoDB example:
 
@@ -223,22 +225,30 @@ MongoDB example:
 $ ./integration-tests/run-performance-tests.sh
 Creating network "integration-tests_default" with the default driver
 Creating integration-tests_coordinator_1 ... done
-Creating integration-tests_dynamodb_1    ... done
 Creating integration-tests_mongodb_1     ... done
+Creating integration-tests_dynamodb_1    ... done
 Creating integration-tests_auditor_1     ... done
 Creating integration-tests_tester_1      ... done
+Creating integration-tests_tester_2      ... done
+Creating integration-tests_tester_3      ... done
+Tests running...
+Tests running...
+Tests running...
 Tests running...
 Tests running...
 Tests finshed
+Tests finshed
+Tests finshed
+Tests finshed
 All done
-auditor f47f8ddf25a0781941658fde7eec46ca4203b35f0f72c8a2a6ef9729d2fa3569: 100
-All requests: 100
+auditor 944a397660205a535097f9d9845f3a5fe6e6bc0d91028f14b7ab7b622105c146: 300
+All requests: 300
 $ ./integration-tests/mongodb-verify-integrity.sh
 MongoDB shell version v4.0.4
 connecting to: mongodb://127.0.0.1:27017/audit
-Implicit session: session { "id" : UUID("663cfa26-7cf8-47fe-a275-049bb04d743f") }
+Implicit session: session { "id" : UUID("65eb1ba2-3790-462c-b26c-ff1d36985047") }
 MongoDB server version: 4.0.4
-Checked 100 records and everything is fine!
+Checked 300 records and everything is fine!
 ```
 
 In the above setup everything is fine.
@@ -276,9 +286,9 @@ MongoDB server version: 4.0.4
 Error in iteration 7: there are 3 records pointing to hash 171c61acf289d8cb7ae269ee0d3352ee2d125ae651a0589bfbe5ff5d53416ea6
 ```
 
-As you can see in distributed environment blockchain is invalid.
+And same tests but for DynamoDB.
 
-And same tests but for DynamoDB. 1 instance of auditor and tester is fine:
+1 instance of auditor and 3 testers:
 
 ```
 $ ./integration-tests/run-performance-tests.sh
@@ -288,17 +298,25 @@ Creating integration-tests_mongodb_1     ... done
 Creating integration-tests_dynamodb_1    ... done
 Creating integration-tests_auditor_1     ... done
 Creating integration-tests_tester_1      ... done
+Creating integration-tests_tester_2      ... done
+Creating integration-tests_tester_3      ... done
+Tests running...
+Tests running...
+Tests running...
 Tests running...
 Tests running...
 Tests finshed
+Tests finshed
+Tests finshed
+Tests finshed
 All done
-auditor 0504c423dd35418cd96c6e88d2e8042658767667f244fd32ad7f1630dd255f06: 100
-All requests: 100
+auditor 89874bdc2e6186a57cebd9df8e59db4b5e3b787bed3ab93eab2bd3aedf05bbe2: 300
+All requests: 300
 $ ./integration-tests/dynamodb-verify-integrity.sh
-Checked 100 records and everything is fine!
+Checked 300 records and everything is fine!
 ```
 
-And 2 auditors and 3 testers result in an invalid blockchain:
+2 auditors and 3 testers results in an invalid blockchain:
 
 ```
 $ ./integration-tests/run-performance-tests.sh

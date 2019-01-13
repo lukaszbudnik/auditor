@@ -25,6 +25,7 @@ type dynamoDB struct {
 func (d *dynamoDB) Save(block interface{}) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	time.Sleep(50 * time.Millisecond)
 	// get type
 	t := reflect.ValueOf(block).Elem().Type()
 	// create *[]type
