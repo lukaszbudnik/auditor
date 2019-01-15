@@ -4,9 +4,8 @@ Auditor records audit entries in a blockchain backed by AWS DynamoDB and Azure C
 
 This is an experiment I conducted to see if these backed stores (despite of their consistency models) can be used to store blockchains. Yes, I am fully aware that both AWS and Azure have managed blockchain services available. These will be my next research subject.
 
-Please also see known issues section at the bottom of this document.
-
 Anyway, this is a project I developed for fun in just a couple of nights. There are a few places that could be done a little bit better. If you would like to contribute take a look at the open issues: https://github.com/lukaszbudnik/auditor/issues.
+If you see other things that could be done better don't hesitate and send me a pull requests with your changes.
 
 # Blockchain
 
@@ -80,7 +79,7 @@ For usage see test: `store/dynamodb/dynamodb_test.go`.
 
 # Configuration
 
-auditor uses a well-known concept of `.env` files. By default auditor will look for `.env` file in the current directory. If you use a custom location/filename please provide a path in `-configFile` command line argument.
+auditor uses a well-known concept of `.env` files. By default auditor will look for `.env` file in the current directory. If you use a custom location/filename you need to provide it as `-configFile` command line argument.
 
 ## MongoDB
 
@@ -88,6 +87,7 @@ If you would like to use CosmosDB/MongoDB use this:
 
 ```
 AUDITOR_STORE=mongodb
+AUDITOR_REDIS=redis.endpoint.here:6379
 MONGODB_USERNAME=XXX
 MONGODB_PASSWORD=XXX
 MONGODB_HOST=XXX.documents.azure.com:10255
@@ -104,6 +104,7 @@ If you would like to use DynamoDB use this:
 
 ```
 AUDITOR_STORE=dynamodb
+AUDITOR_REDIS=redis.endpoint.here:6379
 AWS_REGION=us-west-2
 ```
 
@@ -170,7 +171,7 @@ curl -v http://localhost:8080/audit?limit=1
 curl -v "http://localhost:8080/audit?sort=2019-01-02T00:00:00.000000000%2B00:00&limit=1"
 ```
 
-When running DynamoDB as a backend store you must provide values for the partition key of the DynamoDB table. In the sample struct there is a field called `Customer` tagged with `auditor:"dynamodb_partition"`. This means that POST JSON input must include a value for this field. Also, GET method must have a query parameter `Customer` set.
+When running AWS DynamoDB as a backend store you must provide values for the partition key of the DynamoDB table. In the sample struct there is a field called `Customer` tagged with `auditor:"dynamodb_partition"`. This means that POST JSON input must include a value for this field. Also, GET method must have a query parameter `Customer` set.
 
 Here are some examples to get you started:
 
@@ -193,9 +194,9 @@ curl -v "http://localhost:8080/audit?limit=1&Customer=abc"
 curl -v "http://localhost:8080/audit?sort=2019-01-02T00:00:00.000000000%2B00:00&limit=1&Customer=abc"
 ```
 
-# Executing tests
+# Unit and integration tests
 
-In order to execute tests you need to setup local MongoDB and DynamoDB containers.
+In order to execute unit and integration tests you need to setup local MongoDB, DynamoDB, and Redis containers.
 There is a `docker-compose.yml` available for your convenience:
 
 ```
@@ -204,11 +205,28 @@ $ ./coverage.sh
 $ docker-compose down
 ```
 
-# Known issues
+# Performance tests
 
-Currently (and as per created issues) auditor is using local locks which in distributed environment do not guarantee any integrity at all.
+My implementation is based on AWS DynamoDB and MongoDB (Azure CosmosDB). Both are known for their single digit latencies. This comes at a cost of being eventually consistent.
 
-Further, while running integration tests it turned out that under a high load blockchain integrity was not guaranteed even when running on a single auditor instance. In order to allow both DynamoDB and MongoDB to propagate changes I had to do explicit `time.Sleep(50 * time.Millisecond)` just after acquiring local lock. This slows down auditor itself, but thanks to this trick chainblock is consistent. Notice: This can be due to 1) consistency limitations of backend DBs (I ran some integration tests using AWS and Azure - will re-run more once I rewrite local locks to distributed locks) and 2) in case of local containers, the fact that local containers don't provide same performance as fine-tuned production-grade servers (for example local DynamoDB has a limit of 5 read and write capacity units).
+Everything is fine when you make a reasonable number of HTTP requests. I decided to do some performance testing to see how my blockchain implementation would behave under a high load.
+
+auditor is using a combination of local and distributed locks. Local lock is used to throttle `store.Save()` method calls, followed by distributed Redis lock. For MongoDB single distributed lock is used. For AWS DynamoDB I'm using two. Why two Redis locks? Because with only one lock I was still getting (not always) invalid blockchains (run several tests to verify that). Other solution would probably involve introducing some `time.Sleep()` to allow DynamoDB to propagate changes correctly. Anyway proper distributed synchronisation is out of the scope here. If you have a better idea how to solve it, contributions are most welcomed!
+
+auditor's distributed locks and caching at work:
+
+1. on the entry of `Store.Save()` method - local lock is acquired, this lock is used to throttle method calls
+2. inside `Store.Save()` distributed Redis lock1 is acquired
+3. inside `Store.Save()` distributed Redis lock2 is acquired [AWS DynamoDB only]
+4. audit.previoushash is read from Redis, and:
+    1. if empty auditor reads previous block from the backend store and uses its hash as a previous hash
+    2. if found in Redis, this is the value used
+5. auditor sets previous hash on current block
+6. auditor computes hash and persists current block in the backend store (this takes time to propagate)
+7. auditor stores current hash in Redis as key audit.previoushash
+8. Redis distributed lock2 is released [AWS DynamoDB only]
+9. Redis distributed lock1 is released
+10. local lock is released
 
 For running distributed simulations/performance tests there is an integration test suite in `integration-tests` directory. It comprises of the following 4 key files:
 
@@ -217,7 +235,7 @@ For running distributed simulations/performance tests there is an integration te
 * `dynamodb-verify-integrity.sh` - verifies if blockchain is correct in DynamoDB
 * `mongodb-verify-integrity.sh` - verifies if blockchain is correct in MongoDB
 
-By default `run-performance-tests.sh` launches 1 auditor and 3 tester container. When launched, tester container starts making HTTP requests.
+By default `run-performance-tests.sh` launches 3 auditor and 5 tester containers. When launched, tester containers start making HTTP requests.
 
 MongoDB example:
 
@@ -225,122 +243,79 @@ MongoDB example:
 $ ./integration-tests/run-performance-tests.sh
 Creating network "integration-tests_default" with the default driver
 Creating integration-tests_coordinator_1 ... done
-Creating integration-tests_mongodb_1     ... done
 Creating integration-tests_dynamodb_1    ... done
+Creating integration-tests_redis_1       ... done
+Creating integration-tests_mongodb_1     ... done
 Creating integration-tests_auditor_1     ... done
+Creating integration-tests_auditor_2     ... done
+Creating integration-tests_auditor_3     ... done
 Creating integration-tests_tester_1      ... done
 Creating integration-tests_tester_2      ... done
 Creating integration-tests_tester_3      ... done
+Creating integration-tests_tester_4      ... done
+Creating integration-tests_tester_5      ... done
 Tests running...
 Tests running...
 Tests running...
-Tests running...
-Tests running...
-Tests finshed
-Tests finshed
-Tests finshed
-Tests finshed
+Tests finished
+Tests finished
+Tests finished
+Tests finished
+Tests finished
+Tests finished
+Tests finished
 All done
-auditor 944a397660205a535097f9d9845f3a5fe6e6bc0d91028f14b7ab7b622105c146: 300
-All requests: 300
+auditor b7e607f208390d936da85fa0ed8d91c40c328a52d83ef9d52eecb7d445e3e39a: 164
+auditor 216595c2e2f200aa79a34da225a3e436e2f550835a20469b33f44308c0a6d65b: 174
+auditor a7dcd7f1888ba1d15183c0d0f152a778168024a5e17b8e183505218a17517087: 162
+All requests: 500
 $ ./integration-tests/mongodb-verify-integrity.sh
 MongoDB shell version v4.0.4
 connecting to: mongodb://127.0.0.1:27017/audit
-Implicit session: session { "id" : UUID("65eb1ba2-3790-462c-b26c-ff1d36985047") }
+Implicit session: session { "id" : UUID("00bc0e81-925c-4723-9f2a-7715cb8ae9ec") }
 MongoDB server version: 4.0.4
-Checked 300 records and everything is fine!
+Checked 500 records and everything is fine!
 ```
 
-In the above setup everything is fine.
-
-To simulate distributed environments modify `--scale` parameters inside `run-performance-tests.sh`. When running multiple auditor containers Docker's DNS service kicks in and provides a simple load balancing so these all instances receive more or less same number of requests.
-
-For example here is an output for 2 auditors and 3 testers and a failed verification:
+And same tests but for DynamoDB:
 
 ```
 $ ./integration-tests/run-performance-tests.sh
 Creating network "integration-tests_default" with the default driver
 Creating integration-tests_coordinator_1 ... done
+Creating integration-tests_redis_1       ... done
 Creating integration-tests_dynamodb_1    ... done
 Creating integration-tests_mongodb_1     ... done
 Creating integration-tests_auditor_1     ... done
 Creating integration-tests_auditor_2     ... done
+Creating integration-tests_auditor_3     ... done
 Creating integration-tests_tester_1      ... done
 Creating integration-tests_tester_2      ... done
 Creating integration-tests_tester_3      ... done
+Creating integration-tests_tester_4      ... done
+Creating integration-tests_tester_5      ... done
 Tests running...
 Tests running...
-Tests finshed
-Tests finshed
-Tests finshed
-Tests finshed
+Tests running...
+Tests running...
+Tests running...
+Tests running...
+Tests running...
+Tests running...
+Tests running...
+Tests finished
+Tests finished
+Tests finished
+Tests finished
+Tests finished
+Tests finished
 All done
-auditor 32c18d988b283122c8bb68dd2e874933be673bef56b240cf787679b5b9d8abf9: 150
-auditor 574057729ab06ef2bb177fd0389dc98ea513edfadfc00db9905961edb44ab6ba: 150
-All requests: 300
-$ ./integration-tests/mongodb-verify-integrity.sh
-MongoDB shell version v4.0.4
-connecting to: mongodb://127.0.0.1:27017/audit
-Implicit session: session { "id" : UUID("02e5d606-6e9b-47b0-901a-5d1502c5f704") }
-MongoDB server version: 4.0.4
-Error in iteration 7: there are 3 records pointing to hash 171c61acf289d8cb7ae269ee0d3352ee2d125ae651a0589bfbe5ff5d53416ea6
-```
-
-And same tests but for DynamoDB.
-
-1 instance of auditor and 3 testers:
-
-```
-$ ./integration-tests/run-performance-tests.sh
-Creating network "integration-tests_default" with the default driver
-Creating integration-tests_coordinator_1 ... done
-Creating integration-tests_mongodb_1     ... done
-Creating integration-tests_dynamodb_1    ... done
-Creating integration-tests_auditor_1     ... done
-Creating integration-tests_tester_1      ... done
-Creating integration-tests_tester_2      ... done
-Creating integration-tests_tester_3      ... done
-Tests running...
-Tests running...
-Tests running...
-Tests running...
-Tests running...
-Tests finshed
-Tests finshed
-Tests finshed
-Tests finshed
-All done
-auditor 89874bdc2e6186a57cebd9df8e59db4b5e3b787bed3ab93eab2bd3aedf05bbe2: 300
-All requests: 300
+auditor abbb88b8301b54bcf3760dff605239cc1d2530f19e358b9fffa31506438b3c78: 156
+auditor 4fdd5fd1313f63bd840e8cbb1c86c298f8ecebd6ec0bfb86653a43117737e8ce: 175
+auditor 93cf9c63d909ecbb16d0a9d981ac05459ff2e66e2cb9e481822c1407b209714d: 169
+All requests: 500
 $ ./integration-tests/dynamodb-verify-integrity.sh
-Checked 300 records and everything is fine!
-```
-
-2 auditors and 3 testers results in an invalid blockchain:
-
-```
-$ ./integration-tests/run-performance-tests.sh
-Creating network "integration-tests_default" with the default driver
-Creating integration-tests_coordinator_1 ... done
-Creating integration-tests_mongodb_1     ... done
-Creating integration-tests_dynamodb_1    ... done
-Creating integration-tests_auditor_1     ... done
-Creating integration-tests_auditor_2     ... done
-Creating integration-tests_tester_1      ... done
-Creating integration-tests_tester_2      ... done
-Creating integration-tests_tester_3      ... done
-Tests running...
-Tests running...
-Tests running...
-Tests finshed
-Tests finshed
-Tests finshed
-All done
-auditor a1d06f2f3a0d08678de2d52f71cf82d4eccbcd5c3a3648f2de36bec06cf29d5e: 148
-auditor ae4758bdc7fc61f6bf86600917681bcbf5bb226274ae37d36d3e0de90a2a1a92: 152
-All requests: 300
-$ ./integration-tests/dynamodb-verify-integrity.sh
-Error in iteration 3, there are 0 records pointing to hash ed6805b4da5248d02f9b01e4e7608051e29b50cd7dbd1ba9ce0a1ae9351bf78e
+Checked 500 records and everything is fine!
 ```
 
 # License

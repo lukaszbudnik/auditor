@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"reflect"
 	"sync"
@@ -13,39 +14,72 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
+	"github.com/bsm/redis-lock"
+	"github.com/go-redis/redis"
 	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
 type dynamoDB struct {
 	client *dynamodb.DynamoDB
+	redis  *redis.Client
 	lock   *sync.Mutex
+	lock1  *lock.Locker
+	lock2  *lock.Locker
 }
 
 func (d *dynamoDB) Save(block interface{}) error {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	time.Sleep(50 * time.Millisecond)
-	// get type
-	t := reflect.ValueOf(block).Elem().Type()
-	// create *[]type
-	ts := reflect.SliceOf(t)
-	ptr := reflect.New(ts)
-	ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
-
-	// for dynamodb last block must not be empty
-	// and most field tagged with dynamodb_partiion populated
-	// below we are copying it from the block
-	lastv := reflect.New(t)
-	fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_partition")
-	value := model.GetFieldValue(block, fields[0])
-	model.SetField(lastv.Interface(), fields[0], value)
-
-	d.Read(ptr.Interface(), 1, lastv.Interface())
-	if ptr.Elem().Len() > 0 {
-		model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+	_, err := d.lock1.Lock()
+	if err != nil {
+		log.Printf("ERROR Could not acquire distributed lock1: %v", err.Error())
+		return err
 	}
-	model.ComputeAndSetHash(block)
+	defer d.lock1.Unlock()
+	_, err = d.lock2.Lock()
+	if err != nil {
+		log.Printf("ERROR Could not acquire distributed lock2: %v", err.Error())
+		return err
+	}
+	defer d.lock2.Unlock()
+
+	previousHash, err := d.redis.Get("auditor.previoushash").Result()
+	if err != nil && err != redis.Nil {
+		log.Printf("ERROR Could not get previoushash key from Redis: %v", err.Error())
+		return err
+	}
+
+	if len(previousHash) > 0 {
+		previousHashField := model.GetFieldsTaggedWith(block, "previoushash")
+		model.SetFieldValue(block, previousHashField[0], previousHash)
+	} else {
+		// get type
+		t := reflect.ValueOf(block).Elem().Type()
+		// create *[]type
+		ts := reflect.SliceOf(t)
+		ptr := reflect.New(ts)
+		ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
+
+		// for dynamodb last block must not be empty
+		// and most field tagged with dynamodb_partiion populated
+		// below we are copying it from the block
+		lastv := reflect.New(t)
+		fields := model.GetTypeFieldsTaggedWith(t, "dynamodb_partition")
+		value := model.GetFieldValue(block, fields[0])
+		model.SetFieldValue(lastv.Interface(), fields[0], value)
+
+		d.Read(ptr.Interface(), 1, lastv.Interface())
+		if ptr.Elem().Len() > 0 {
+			model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+		}
+	}
+
+	currentHash, err := model.ComputeAndSetHash(block)
+
+	if err != nil {
+		return err
+	}
 
 	av, err := dynamodbattribute.MarshalMap(block)
 	if err != nil {
@@ -58,6 +92,11 @@ func (d *dynamoDB) Save(block interface{}) error {
 	}
 
 	_, err = d.client.PutItem(putInput)
+
+	if err == nil {
+		// current hash becomes previoushash
+		d.redis.Set("auditor.previoushash", currentHash, time.Second)
+	}
 
 	return err
 }
@@ -145,6 +184,9 @@ func (d *dynamoDB) Close() {
 	if d.client != nil {
 		d.client.Config.Credentials.Expire()
 	}
+	if d.redis != nil {
+		d.redis.Close()
+	}
 }
 
 // New creates Store implementation for DynamoDB
@@ -154,7 +196,28 @@ func New() (store.Store, error) {
 		return nil, err
 	}
 
-	dynamoDB := &dynamoDB{client: client, lock: &sync.Mutex{}}
+	redisEndpoint := os.Getenv("AUDITOR_REDIS")
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "localhost"
+	}
+	token := fmt.Sprintf("%v-%v", hostname, os.Getpid())
+
+	redis := redis.NewClient(&redis.Options{
+		Network: "tcp",
+		Addr:    redisEndpoint,
+	})
+
+	lock1 := lock.New(redis, "auditor.lock1", &lock.Options{
+		RetryCount:  10,
+		TokenPrefix: token,
+	})
+	lock2 := lock.New(redis, "auditor.lock2", &lock.Options{
+		RetryCount:  10,
+		TokenPrefix: token,
+	})
+
+	dynamoDB := &dynamoDB{client: client, redis: redis, lock: &sync.Mutex{}, lock1: lock1, lock2: lock2}
 	return dynamoDB, nil
 }
 

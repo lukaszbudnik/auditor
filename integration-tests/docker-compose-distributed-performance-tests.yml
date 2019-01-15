@@ -19,12 +19,18 @@ services:
       - '27017'
     depends_on:
       - 'coordinator'
+  redis:
+    image: 'redis'
+    ports:
+      - '6379'
+    depends_on:
+      - 'coordinator'
   auditor:
     build:
       context: '..'
       dockerfile: 'integration-tests/Dockerfile-auditor'
     environment:
-      AUDITOR_STORE: 'dynamodb'
+      AUDITOR_STORE: 'mongodb'
       AUDITOR_CONFIG_FILE: '/.env.test.integration'
     image: 'auditor:latest'
     ports:

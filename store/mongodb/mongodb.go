@@ -3,6 +3,7 @@ package mongodb
 import (
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"reflect"
@@ -11,18 +12,25 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bsm/redis-lock"
 	"github.com/globalsign/mgo"
 	"github.com/globalsign/mgo/bson"
+	"github.com/go-redis/redis"
 	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 )
 
 type mongoDB struct {
 	session *mgo.Session
+	redis   *redis.Client
 	lock    *sync.Mutex
+	lock1   *lock.Locker
 }
 
 func (m *mongoDB) Save(block interface{}) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	collection := m.session.DB("audit").C("audit")
 
 	indexFields := model.GetFieldsTaggedWith(block, "mongodb_index")
@@ -37,26 +45,45 @@ func (m *mongoDB) Save(block interface{}) error {
 		}
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
-	time.Sleep(50 * time.Millisecond)
-	// get type
-	t := reflect.ValueOf(block).Elem().Type()
-	// create *[]type
-	ts := reflect.SliceOf(t)
-	ptr := reflect.New(ts)
-	ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
-
-	m.Read(ptr.Interface(), 1, nil)
-	if ptr.Elem().Len() > 0 {
-		model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+	_, err := m.lock1.Lock()
+	if err != nil {
+		log.Printf("ERROR Could not acquire distributed lock1: %v", err.Error())
+		return err
 	}
-	model.ComputeAndSetHash(block)
+	defer m.lock1.Unlock()
 
-	// insert Document in collection
+	previousHash, err := m.redis.Get("auditor.previoushash").Result()
+	if err != nil && err != redis.Nil {
+		log.Printf("ERROR Could not get previoushash key from Redis: %v", err.Error())
+		return err
+	}
+
+	if len(previousHash) > 0 {
+		previousHashField := model.GetFieldsTaggedWith(block, "previoushash")
+		model.SetFieldValue(block, previousHashField[0], previousHash)
+	} else {
+		// get type
+		t := reflect.ValueOf(block).Elem().Type()
+		// create *[]type
+		ts := reflect.SliceOf(t)
+		ptr := reflect.New(ts)
+		ptr.Elem().Set(reflect.MakeSlice(ts, 0, 1))
+
+		m.Read(ptr.Interface(), 1, nil)
+		if ptr.Elem().Len() > 0 {
+			model.SetPreviousHash(block, ptr.Elem().Index(0).Addr().Interface())
+		}
+	}
+	currentHash, err := model.ComputeAndSetHash(block)
+	if err != nil {
+		return err
+	}
+
 	if err := collection.Insert(block); err != nil {
 		return err
 	}
+
+	m.redis.Set("auditor.previoushash", currentHash, time.Second)
 
 	return nil
 }
@@ -117,7 +144,24 @@ func New() (store.Store, error) {
 		return nil, err
 	}
 
-	var mongoDB store.Store = &mongoDB{session: session, lock: &sync.Mutex{}}
+	redisEndpoint := os.Getenv("AUDITOR_REDIS")
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "localhost"
+	}
+	token := fmt.Sprintf("%v-%v", hostname, os.Getpid())
+
+	redis := redis.NewClient(&redis.Options{
+		Network: "tcp",
+		Addr:    redisEndpoint,
+	})
+
+	lock1 := lock.New(redis, "auditor.lock1", &lock.Options{
+		RetryCount:  10,
+		TokenPrefix: token,
+	})
+
+	var mongoDB store.Store = &mongoDB{session: session, redis: redis, lock: &sync.Mutex{}, lock1: lock1}
 	return mongoDB, nil
 }
 

@@ -3,7 +3,7 @@
 # I use relative paths so make sure we are inside tests dir
 cd $(dirname "$0")
 
-docker-compose -f docker-compose-distributed-performance-tests.yml up --detach --scale auditor=1 --scale tester=3
+docker-compose -f docker-compose-distributed-performance-tests.yml up --detach --scale auditor=3 --scale tester=5
 
 testers=$(docker-compose -f docker-compose-distributed-performance-tests.yml ps -q tester)
 
@@ -14,7 +14,7 @@ while true; do
   for tester in $testers; do
     running=$(docker inspect -f {{.State.Running}} $tester)
     if [[ "false" == "$running" ]]; then
-      echo "Tests finshed"
+      echo "Tests finished"
       finished=$(($finished+1))
       continue
     fi
