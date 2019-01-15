@@ -46,12 +46,12 @@ func getLastBlock(r *http.Request, result interface{}) {
 	time, err := time.Parse(time.RFC3339Nano, t)
 	if err == nil {
 		fields := model.GetFieldsTaggedWith(result, "sort")
-		model.SetField(result, fields[0], &time)
+		model.SetFieldValue(result, fields[0], &time)
 	}
 	fields := model.GetFieldsTaggedWith(result, "dynamodb_partition")
 	if len(fields) > 0 {
 		partition := r.URL.Query().Get(fields[0].Name)
-		model.SetField(result, fields[0], partition)
+		model.SetFieldValue(result, fields[0], partition)
 	}
 }
 

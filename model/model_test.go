@@ -40,7 +40,7 @@ func TestSetField(t *testing.T) {
 	block := &testBlock{}
 	fields := GetFieldsTaggedWith(block, "mongodb_index")
 	expected := "This is new value"
-	SetField(block, fields[0], expected)
+	SetFieldValue(block, fields[0], expected)
 	assert.Equal(t, expected, block.Category)
 }
 
