@@ -1,22 +1,46 @@
 package model
 
 import (
-	"fmt"
+	"log"
+	"os"
 	"reflect"
 	"strings"
 
 	"github.com/lukaszbudnik/auditor/hash"
 )
 
+// ValidateBlockType validates if passed pointer to struct is a valid auditor block
+func ValidateBlockType(block interface{}) {
+	validateBlock(block)
+	hashField := GetTypeFieldsTaggedWith(reflect.TypeOf(block).Elem(), "hash")
+	if len(hashField) != 1 {
+		log.Panicf("block type must have one field tagged with 'hash', found: %v", len(hashField))
+	}
+	previousHashField := GetTypeFieldsTaggedWith(reflect.TypeOf(block).Elem(), "previoushash")
+	if len(previousHashField) != 1 {
+		log.Panicf("block type must have one field tagged with 'previoushash', found: %v", len(previousHashField))
+	}
+	sortField := GetTypeFieldsTaggedWith(reflect.TypeOf(block).Elem(), "sort")
+	if len(sortField) != 1 {
+		log.Panicf("block type must have one field tagged with 'sort', found: %v", len(sortField))
+	}
+	if os.Getenv("AUDITOR_STORE") == "dynamodb" {
+		partitionField := GetTypeFieldsTaggedWith(reflect.TypeOf(block).Elem(), "dynamodb_partition")
+		if len(partitionField) != 1 {
+			log.Panicf("when using DynamoDB block type must have one field tagged with 'dynamodb_partition', found: %v", len(partitionField))
+		}
+	}
+}
+
 func validateBlock(block interface{}) {
 	if block == nil {
-		panic("block must not be nil")
+		log.Panic("block must not be nil")
 	}
 	if reflect.TypeOf(block).Kind() != reflect.Ptr {
-		panic(fmt.Sprintf("block argument must be a pointer to struct, but got: %v", reflect.TypeOf(block).Kind()))
+		log.Panicf("block argument must be a pointer to struct, but got: %v", reflect.TypeOf(block).Kind())
 	}
 	if reflect.TypeOf(block).Elem().Kind() != reflect.Struct {
-		panic(fmt.Sprintf("block argument must be a pointer to struct, but got: %v", reflect.TypeOf(block).Elem().Kind()))
+		log.Panicf("block argument must be a pointer to struct, but got: %v", reflect.TypeOf(block).Elem().Kind())
 	}
 }
 

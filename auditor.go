@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/joho/godotenv"
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/server"
 	"github.com/lukaszbudnik/auditor/store/provider"
 )
@@ -15,6 +16,10 @@ const (
 )
 
 func main() {
+	// fail fast, ValidateBlockType method panics if type of passed struct is invalid
+	// this simplifies operations in the rest of the auditor code
+	model.ValidateBlockType(&server.Block{})
+
 	var configFile string
 	flag.StringVar(&configFile, "configFile", "", "optional argument with a name of configuration file to use")
 	flag.Parse()
