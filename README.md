@@ -134,7 +134,7 @@ The operations are:
 * POST /audit - creates new audit entry, entry is passed as JSON input, auditor will validate the JSON before processing it, for request tracing you may use optional `X-Request-Id` header
 * GET /audit - reads audit entries, for request tracing you may use optional `X-Request-Id` header
 
-The server package comes with a sample struct which looks like this (yes, a single struct can be used for both DynamoDB and MongoDB):
+The model package comes with a sample struct which looks like this (yes, a single struct can be used for both DynamoDB and MongoDB):
 
 ```
 type Block struct {
@@ -148,7 +148,7 @@ type Block struct {
 }
 ```
 
-Feel free to modify it to match your requirements.
+Feel free to modify it to match your requirements. auditor validates this struct upon start and panics if something is wrong with its definition.
 
 And a couple of MongoDB examples to get you started:
 

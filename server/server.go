@@ -16,17 +16,6 @@ import (
 	"gopkg.in/validator.v2"
 )
 
-// Block is a sample struct
-type Block struct {
-	Customer     string     `auditor:"dynamodb_partition,mongodb_index"`
-	Timestamp    *time.Time `auditor:"sort,mongodb_index" validate:"nonzero"`
-	Category     string     `auditor:"mongodb_index"`
-	Subcategory  string     `auditor:"mongodb_index"`
-	Event        string     `validate:"nonzero"`
-	Hash         string     `auditor:"hash"`
-	PreviousHash string     `auditor:"previoushash"`
-}
-
 const (
 	defaultPort     string = "8080"
 	requestIDHeader string = "X-Request-Id"
@@ -124,10 +113,10 @@ func auditHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 func auditGetHandler(w http.ResponseWriter, r *http.Request, store store.Store) {
 	limit := getLimit(r)
 
-	lastBlock := &Block{}
+	lastBlock := &model.Block{}
 	getLastBlock(r, lastBlock)
 
-	audit := []Block{}
+	audit := []model.Block{}
 	err := store.Read(&audit, limit, lastBlock)
 	if err != nil {
 		errorInternalServerErrorResponse(w, err)
@@ -145,7 +134,7 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, store store.Store)
 		return
 	}
 
-	block := &Block{}
+	block := &model.Block{}
 	err = json.Unmarshal(body, block)
 	if err != nil {
 		common.LogError(r.Context(), "Bad request: %v", err.Error())
@@ -165,7 +154,13 @@ func auditPostHandler(w http.ResponseWriter, r *http.Request, store store.Store)
 		return
 	}
 
-	okResponseWithMessage(w, block.Hash, block.PreviousHash)
+	hashField := model.GetFieldsTaggedWith(block, "hash")
+	hash := model.GetFieldStringValue(block, hashField[0])
+
+	previousHashField := model.GetFieldsTaggedWith(block, "previoushash")
+	previousHash := model.GetFieldStringValue(block, previousHashField[0])
+
+	okResponseWithMessage(w, hash, previousHash)
 }
 
 func registerHandlers(store store.Store) *http.ServeMux {

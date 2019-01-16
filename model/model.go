@@ -5,9 +5,21 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/lukaszbudnik/auditor/hash"
 )
+
+// Block is a sample struct
+type Block struct {
+	Customer     string     `auditor:"dynamodb_partition,mongodb_index"`
+	Timestamp    *time.Time `auditor:"sort,mongodb_index" validate:"nonzero"`
+	Category     string     `auditor:"mongodb_index"`
+	Subcategory  string     `auditor:"mongodb_index"`
+	Event        string     `validate:"nonzero"`
+	Hash         string     `auditor:"hash"`
+	PreviousHash string     `auditor:"previoushash"`
+}
 
 // ValidateBlockType validates if passed pointer to struct is a valid auditor block
 func ValidateBlockType(block interface{}) {
@@ -69,7 +81,7 @@ func GetFieldsTaggedWith(block interface{}, tagValue string) []reflect.StructFie
 	return GetTypeFieldsTaggedWith(t, tagValue)
 }
 
-// GetFieldValue gets a StructField tagged with a specific auditor value
+// GetFieldValue gets an interface{} value for given StructField
 func GetFieldValue(block interface{}, field reflect.StructField) interface{} {
 	// we expect block to be a pointer to a struct
 	validateBlock(block)
@@ -77,6 +89,15 @@ func GetFieldValue(block interface{}, field reflect.StructField) interface{} {
 	fieldValue := reflect.ValueOf(block).Elem().FieldByName(field.Name)
 
 	return fieldValue.Interface()
+}
+
+// GetFieldStringValue gets a string value for given StructField
+func GetFieldStringValue(block interface{}, field reflect.StructField) string {
+	validateBlock(block)
+
+	fieldValue := reflect.ValueOf(block).Elem().FieldByName(field.Name)
+
+	return fieldValue.String()
 }
 
 // SetFieldValue sets a new value of a given field on a passed pointer to struct

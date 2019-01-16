@@ -94,6 +94,14 @@ func TestGetFieldValue(t *testing.T) {
 	assert.Equal(t, category, fieldValue)
 }
 
+func TestGetFieldStringValue(t *testing.T) {
+	hash := "123"
+	block := &testBlock{Hash: hash}
+	fields := GetFieldsTaggedWith(block, "hash")
+	fieldString := GetFieldStringValue(block, fields[0])
+	assert.Equal(t, hash, fieldString)
+}
+
 func TestGetFieldValuePtr(t *testing.T) {
 	time := time.Now()
 	block := &testBlock{Timestamp: &time}
@@ -102,7 +110,7 @@ func TestGetFieldValuePtr(t *testing.T) {
 	assert.Equal(t, &time, fieldValue)
 }
 
-func TestSetField(t *testing.T) {
+func TestSetFieldValue(t *testing.T) {
 	block := &testBlock{}
 	fields := GetFieldsTaggedWith(block, "mongodb_index")
 	expected := "This is new value"

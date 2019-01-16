@@ -18,7 +18,7 @@ const (
 func main() {
 	// fail fast, ValidateBlockType method panics if type of passed struct is invalid
 	// this simplifies operations in the rest of the auditor code
-	model.ValidateBlockType(&server.Block{})
+	model.ValidateBlockType(&model.Block{})
 
 	var configFile string
 	flag.StringVar(&configFile, "configFile", "", "optional argument with a name of configuration file to use")
