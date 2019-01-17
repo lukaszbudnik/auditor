@@ -10,7 +10,7 @@ import (
 type mockStore struct {
 	errorThreshold int
 	counter        int
-	audit          []Block
+	audit          []model.Block
 }
 
 func (ms *mockStore) Save(block interface{}) error {
@@ -21,7 +21,7 @@ func (ms *mockStore) Save(block interface{}) error {
 		model.SetPreviousHash(block, &ms.audit[len(ms.audit)-1])
 	}
 	model.ComputeAndSetHash(block)
-	ms.audit = append(ms.audit, *block.(*Block))
+	ms.audit = append(ms.audit, *block.(*model.Block))
 	ms.counter++
 	return nil
 }

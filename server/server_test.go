@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lukaszbudnik/auditor/model"
 	"github.com/lukaszbudnik/auditor/store"
 	"github.com/lukaszbudnik/migrator/common"
 	"github.com/stretchr/testify/assert"
@@ -39,15 +40,15 @@ func newMockStore() store.Store {
 	return newMockStoreWithError(-1)()
 }
 
-func newMockStoreWithAudit(audit []Block) func() store.Store {
+func newMockStoreWithAudit(audit []model.Block) func() store.Store {
 	return newMockStoreWithErrorAndAudit(-1, audit)
 }
 
 func newMockStoreWithError(threshold int) func() store.Store {
-	return newMockStoreWithErrorAndAudit(threshold, []Block{})
+	return newMockStoreWithErrorAndAudit(threshold, []model.Block{})
 }
 
-func newMockStoreWithErrorAndAudit(threshold int, audit []Block) func() store.Store {
+func newMockStoreWithErrorAndAudit(threshold int, audit []model.Block) func() store.Store {
 	return func() store.Store {
 		return &mockStore{errorThreshold: threshold, counter: 1, audit: audit}
 	}
@@ -82,7 +83,7 @@ func TestGetLimitError(t *testing.T) {
 func TestGetLastBlock(t *testing.T) {
 	request, err := newTestRequest(http.MethodGet, "http://example.com/?sort=2019-01-01T12:39:01.999999999%2B01:00", nil)
 	assert.Nil(t, err)
-	lastBlock := &Block{}
+	lastBlock := &model.Block{}
 	getLastBlock(request, lastBlock)
 	assert.Equal(t, "2019-01-01 11:39:01 +0000 UTC", lastBlock.Timestamp.UTC().Truncate(time.Second).String())
 }
@@ -90,7 +91,7 @@ func TestGetLastBlock(t *testing.T) {
 func TestGetLastBlockWithDynamodbPartition(t *testing.T) {
 	request, err := newTestRequest(http.MethodGet, "http://example.com/?sort=2019-01-01T12:39:01.999999999%2B01:00&Customer=abc", nil)
 	assert.Nil(t, err)
-	lastBlock := &Block{}
+	lastBlock := &model.Block{}
 	getLastBlock(request, lastBlock)
 	assert.Equal(t, "2019-01-01 11:39:01 +0000 UTC", lastBlock.Timestamp.UTC().Truncate(time.Second).String())
 	assert.Equal(t, "abc", lastBlock.Customer)
@@ -102,7 +103,7 @@ func TestGetLastBlockError(t *testing.T) {
 		request, err := newTestRequest(http.MethodGet, fmt.Sprintf("http://example.com/?sort=%v", i), nil)
 		assert.Nil(t, err)
 
-		lastBlock := &Block{}
+		lastBlock := &model.Block{}
 		getLastBlock(request, lastBlock)
 		assert.Nil(t, lastBlock.Timestamp)
 	}
@@ -141,8 +142,8 @@ func TestAuditMethodNotAllowed(t *testing.T) {
 
 func TestAuditGet(t *testing.T) {
 	time, _ := time.Parse(time.RFC3339Nano, "2019-01-03T08:09:09.611985+01:00")
-	audit := []Block{}
-	audit = append(audit, Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
+	audit := []model.Block{}
+	audit = append(audit, model.Block{Customer: "a", Timestamp: &time, Event: "some event", Category: "cat", Subcategory: "subcat", Hash: "1234567890abcdef", PreviousHash: "0987654321xyzghj"})
 	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit)())
 
 	req, _ := newTestRequest(http.MethodGet, "http://example.com/audit", nil)
@@ -179,8 +180,8 @@ func TestAuditPost(t *testing.T) {
 }
 
 func TestAuditPostPreviousHash(t *testing.T) {
-	audit := []Block{}
-	audit = append(audit, Block{Hash: "1234567890abcdef"})
+	audit := []model.Block{}
+	audit = append(audit, model.Block{Hash: "1234567890abcdef"})
 	handler := makeHandler(auditHandler, newMockStoreWithAudit(audit)())
 
 	json := newJSONInput()
